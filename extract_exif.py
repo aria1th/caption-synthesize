@@ -1,3 +1,4 @@
+import tempfile
 from PIL import Image
 import gzip
 import os
@@ -138,21 +139,32 @@ def classify_image(img):
     print("Handling image")
     return read_info_from_image_stealth(img) #returns string
 
-with gr.Blocks() as block:
+def read_and_extract(img:str):
+    return read_info_from_image_stealth(img)
+with gr.Blocks(analytics_enabled=False) as block:
     with gr.Tab("Extract Text"):
         #inputs = gr.Image(type="pil", label="Original Image", source="upload")
         input_path = gr.Textbox(label="Path to Image")
         outputs = gr.Textbox(label="Extracted Text")
         
-        button = gr.Button(label="Extract")
+        button = gr.Button(value="Extract")
         button.click(
             fn=classify_image,
             inputs=[input_path],
             outputs=[outputs],
         )
+    with gr.Tab("Extract text from image(file)"):
+        input = gr.Image(label="source", sources="upload", type="pil",interactive=True,image_mode="RGBA")
+        outputs = gr.Textbox(label="Extracted Text")
+        button = gr.Button(value="Extract")
+        button.click(
+            fn=read_and_extract,
+            inputs=[input],
+            outputs=[outputs],
+        )
     with gr.Tab("Extract Text from Folder"):
         inputs = gr.Textbox(label="Folder with Images")
-        button = gr.Button(label="Extract")
+        button = gr.Button(value="Extract")
         button.click(
             fn=extract_exif,
             inputs=[inputs],
