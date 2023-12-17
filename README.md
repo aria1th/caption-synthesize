@@ -4,8 +4,7 @@ Recently, LAION type dataset research have discovered that it has insufficient i
 
 Rather we can call it miracle that models which were dependent at the open dataset, working despite of those discrepencies.
 
-[Google](https://arxiv.org/pdf/2310.16656.pdf), [OpenAi](https://cdn.openai.com/papers/dall-e-3.pdf
-) has discovered that synthetic captions are far ![image](https://github.com/aria1th/caption-synthesize/assets/35677394/9055b913-6603-4836-a2bf-6f5872c28565)
+[Google](https://arxiv.org/pdf/2310.16656.pdf), [OpenAi](https://cdn.openai.com/papers/dall-e-3.pdf) has discovered that synthetic captions are far
 beneficial for dependent task, and CapsFusion project tries to annotate the large scale dataset with synthetic way.
 
 [Meta](https://github.com/facebookresearch/DCI) also tries to make a high-quality refined dataset, with hierarchical way.
