@@ -5,7 +5,6 @@ import os
 import glob
 
 def read_info_from_image_stealth(image):
-    print(image.mode)
     # if tensor, convert to PIL image
     if hasattr(image, 'cpu'):
         image = image.cpu().numpy() #((1, 1, 1280, 3), '<f4')
@@ -131,6 +130,19 @@ def extract_exif(path):
         data = data["Description"]
         with open(file.replace('.png', '.txt'), 'w') as f:
             f.write(data)
+def extract_exif_classify(path):
+    # instead of writing, if not exists, move to path / without_exif folder
+    for file in tqdm.tqdm(glob.glob(os.path.join(path, '*.png'))):
+        image = Image.open(file)
+        data = (read_info_from_image_stealth(image))
+        if not data:
+            # move to path / without_exif folder
+            target_path = os.path.join(path, 'without_exif')
+            if not os.path.exists(target_path):
+                os.makedirs(target_path)
+            #print("Moving to", target_path)
+            os.rename(file, os.path.join(target_path, os.path.basename(file)))
+            continue
 
 import gradio as gr
 
@@ -161,6 +173,13 @@ with gr.Blocks(analytics_enabled=False) as block:
             fn=read_and_extract,
             inputs=[input],
             outputs=[outputs],
+        )
+    with gr.Tab("Classify Folder"):
+        inputs = gr.Textbox(label="Folder with Images")
+        button = gr.Button(value="Extract")
+        button.click(
+            fn=extract_exif_classify,
+            inputs=[inputs],
         )
     with gr.Tab("Extract Text from Folder"):
         inputs = gr.Textbox(label="Folder with Images")
