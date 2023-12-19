@@ -75,6 +75,15 @@ def tags_formatted(image_path):
         tags = f.read()
     return tags
 
+def read_result(image_path):
+    """
+    Reads Generated or Annotated text from the given image path.
+    """
+    extension = pathlib.Path(image_path).suffix
+    with open(image_path.replace(extension, '_annotated.txt'), 'r',encoding='utf-8') as f:
+        result = f.read()
+    return result
+
 def generate_text(image_path, return_input=False):
     """
     Generate text from the given image and tags.
@@ -83,8 +92,13 @@ def generate_text(image_path, return_input=False):
     inputs = [
         TAGS_TEMPLATE,
         image_inference(),
+        tags_formatted('assets/04a0102966be49b7a97548994b228065.jpg'),
+        image_inference('assets/04a0102966be49b7a97548994b228065.jpg'),
+        "RESPONSE:",
+        read_result('assets/04a0102966be49b7a97548994b228065.jpg'),
         tags_formatted(image_path),
-        image_inference(image_path)
+        image_inference(image_path),
+        "RESPONSE:",
     ]
     response = setup_model().generate_content(
         inputs,
@@ -119,13 +133,13 @@ def query_gemini_file(image_path:str):
     extension = pathlib.Path(image_path).suffix
     try:
         text = generate_text(image_path)
-        with open(image_path.replace(extension, '._gemini.json'), 'w',encoding='utf-8') as f:
+        with open(image_path.replace(extension, '_gemini.txt'), 'w',encoding='utf-8') as f:
             f.write(text)
     except Exception as e:
         print(f"Error occured while processing {image_path}!")
         print(e)
 
-def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1.1):
+def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1.1, max_threads:int = 10):
     """
     Query gemini with the given image path.
     """
@@ -133,17 +147,12 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
     if not files:
         print(f"No files found for {os.path.join(path, f'*{extension}')}!")
         return
-    import threading
+    from concurrent.futures import ThreadPoolExecutor
     import time
-    threads = []
-    for file in tqdm.tqdm(files):
-        threads.append(threading.Thread(target=query_gemini_file, args=(file,)))
-        time.sleep(sleep_time)
-        threads[-1].start()
-    
-    for thread in threads:
-        thread.join()
-    
+    with ThreadPoolExecutor(max_workers=max_threads) as executor:
+        for file in tqdm.tqdm(files):
+            executor.submit(query_gemini_file, file)
+            time.sleep(sleep_time)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
