@@ -29,6 +29,7 @@ TAGS_TEMPLATE = r"""
 Analyze the image in a comprehensive and detailed manner.
 The response will be used for constructing dataset in academic research. 
 Thus you must include anything that is necessary to explain the image including given tags.
+DO NOT exclude given tags, if it is duplicate, then just concatenate them as group
 
 If tags are given, You must use the given tags, and reorder them to explain the image.
 You must not explain the unrecognized subject or features.
@@ -126,7 +127,7 @@ def query_gemini(path:str, extension:str = '.png'):
     for file in tqdm.tqdm(files):
         query_gemini_file(file)
 
-def query_gemini_file(image_path:str):
+def query_gemini_file(image_path:str, optional_progress_bar:tqdm.tqdm = None):
     """
     Query gemini with the given image path.
     """
@@ -138,6 +139,9 @@ def query_gemini_file(image_path:str):
     except Exception as e:
         print(f"Error occured while processing {image_path}!")
         print(e)
+    finally:
+        if optional_progress_bar is not None:
+            optional_progress_bar.update(1)
 
 def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1.1, max_threads:int = 10):
     """
@@ -150,8 +154,9 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
     from concurrent.futures import ThreadPoolExecutor
     import time
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
-        for file in tqdm.tqdm(files):
-            executor.submit(query_gemini_file, file)
+        pbar = tqdm.tqdm(total=len(files))
+        for file in files:
+            executor.submit(query_gemini_file, file, pbar)
             time.sleep(sleep_time)
 
 if __name__ == '__main__':
