@@ -103,17 +103,23 @@ async def main(dir="aibooru",tags=["novelai"]):
     _i = 0
     if posts:
         for post in tqdm.tqdm(posts):
-            filepath = path / post.filename
-            if filepath.exists():
-                continue # skip if already exists
-            try:
-                media_data = await post.get_media()
-            except Exception as exception:
-                logging.error(f"Failed to download {post.filename} from {post.link} due to {exception}")
-                continue
-            with open(filepath, "wb") as file:
-                file.write(media_data)
             _i += 1
+            filepath = path / post.filename
+            if not filepath.exists():
+                try:
+                    media_data = await post.get_media()
+                except Exception as exception:
+                    logging.error(f"Failed to download {post.filename} from {post.link} due to {exception}")
+                    continue
+                with open(filepath, "wb") as file:
+                    file.write(media_data)
+            json_path = path / f"{post.md5}.json"
+            if not json_path.exists():
+                with open(json_path, "w", encoding='utf-8') as file:
+                    json.dump(post.dict(), file)
+            meta_tag_text_path = path / f"{post.md5}.txt"
+            if not meta_tag_text_path.exists():
+                generate_text_from_json(json_path)
             logging.info(f"Downloaded {post.filename}, {_i} / {len(posts)}")
     else:
         logging.error("No posts found")
@@ -173,7 +179,26 @@ general tags: {json_read["tag_string_general"]}
             file.write(metadata_dict_stringify)
         logging.info(f"Saved metadata dict for {filepath}")
 
-    
+def generate_text_from_json(filepath):
+    """
+    Generate text from json file.
+    """
+    if isinstance(filepath, pathlib.Path):
+        filepath = str(filepath)
+    json_read = json.load(open(filepath, "r", encoding='utf-8'))
+    string = ""
+    for i, j in [
+        ["copyright", "tag_string_copyright"],
+        ["character", "tag_string_character"],
+        ["general tags", "tag_string_general"],
+    ]:
+        string += f"{i}: {json_read[j]}\n"
+    if not string or string.isspace() or os.path.exists(filepath.replace(".json", ".txt")):
+        print(f"Skipping {filepath}")
+        return
+    with open(filepath.replace(".json", ".txt"), "w", encoding='utf-8') as file:
+        file.write(string)
+
 def create_subset(dir="aibooru", subset_dir="aibooru_subset", filter = lambda x: True, subset_size=10000, strategy="move"):
     path = pathlib.Path(dir)
     subset_path = pathlib.Path(subset_dir)
