@@ -162,12 +162,15 @@ if __name__ == '__main__':
     parser.add_argument('--ext', type=str, default='.png', help='File extension of the image')
     parser.add_argument('--api_key', type=str, default=None, help='Google API Key')
     parser.add_argument('--threaded', action='store_true', help='Use threaded version')
+    parser.add_argument('--max_threads', type=int, default=8, help='Max threads to use')
+    parser.add_argument('--sleep_time', type=float, default=1.1, help='Sleep time between threads')
     args = parser.parse_args()
     load_secret(args.api_key)
+    MAX_THREADS = args.max_threads
     if args.single_file: # query single file
         query_gemini_file(args.single_file)
         sys.exit(0)
     if args.threaded:
-        query_gemini_threaded(args.path, args.ext)
+        query_gemini_threaded(args.path, args.ext, args.sleep_time, args.max_threads)
     else:
         query_gemini(args.path, args.ext)
