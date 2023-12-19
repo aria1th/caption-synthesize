@@ -1,6 +1,7 @@
 from typing import List
 import aiohttp
-
+SKIP_TEXT_EXISTING = False # if True, skip existing .txt files
+SKIP_ARTIST_TAG = True # if True, skip artist tag. This is useful for ai-generated images since all users are artists.
 from aiodanbooru.api import DanbooruAPI
 from aiodanbooru.models import DanbooruPost
 
@@ -94,6 +95,8 @@ import os
 import logging
 import json
 import tqdm
+
+
 async def main(dir="aibooru",tags=["novelai"]):
     api = AIBooruAPI(base_url="https://aibooru.online")
     path = pathlib.Path(dir)
@@ -118,12 +121,18 @@ async def main(dir="aibooru",tags=["novelai"]):
                 with open(json_path, "w", encoding='utf-8') as file:
                     json.dump(post.dict(), file)
             meta_tag_text_path = path / f"{post.md5}.txt"
-            if not meta_tag_text_path.exists():
+            if not SKIP_TEXT_EXISTING or not meta_tag_text_path.exists():
                 generate_text_from_json(json_path)
             logging.info(f"Downloaded {post.filename}, {_i} / {len(posts)}")
     else:
         logging.error("No posts found")
 
+rating_dict = {
+    "s" : "safe",
+    "q" : "questionable",
+    "e" : "explicit",
+    "g" : "general"
+}
 async def get_metadata_dict(dir="aibooru",tags=["novelai"]):
     api = AIBooruAPI(base_url="https://aibooru.online")
     path = pathlib.Path(dir)
@@ -145,6 +154,8 @@ async def get_metadata_dict(dir="aibooru",tags=["novelai"]):
 copyright: {json_read["tag_string_copyright"]}
 character: {json_read["tag_string_character"]}
 general tags: {json_read["tag_string_general"]}
+artist: {json_read["tag_string_artist"]}
+rating: {rating_dict.get([json_read["rating"]] or "unknown")}
 """
             if not filepath.exists():
                 with open(filepath, "w", encoding='utf-8') as file:
@@ -165,18 +176,7 @@ def cleanup_get_txt_from_existing(dir="aibooru"):
     if not path.exists():
         path.mkdir()
     for filepath in path.glob("*.json"):
-        id = filepath.stem
-        filepath_txt = path / f"{id}.txt"
-        if filepath_txt.exists():
-            continue
-        json_read = json.load(open(filepath, "r", encoding='utf-8'))
-        metadata_dict_stringify = f"""
-copyright: {json_read["tag_string_copyright"]}
-character: {json_read["tag_string_character"]}
-general tags: {json_read["tag_string_general"]}
-"""
-        with open(filepath_txt, "w", encoding='utf-8') as file:
-            file.write(metadata_dict_stringify)
+        generate_text_from_json(filepath)
         logging.info(f"Saved metadata dict for {filepath}")
 
 def generate_text_from_json(filepath):
@@ -191,9 +191,26 @@ def generate_text_from_json(filepath):
         ["copyright", "tag_string_copyright"],
         ["character", "tag_string_character"],
         ["general tags", "tag_string_general"],
+        ["artist", "tag_string_artist"],
+        ["rating" , "rating"]
     ]:
-        string += f"{i}: {json_read[j]}\n"
-    if not string or string.isspace() or os.path.exists(filepath.replace(".json", ".txt")):
+        key, value = i, json_read[j]
+        if SKIP_ARTIST_TAG and key == 'artist':
+            continue
+        if key == 'rating':
+            # special handler
+            if value == 'q':
+                value = 'questionable'
+            elif value == 's':
+                value = 'senstive'
+            elif value == 'e':
+                value = 'explicit'
+            elif value == 'g':
+                value = 'general'
+            else:
+                value = 'unknown'
+        string += f"{i}: {value}\n"
+    if not string or string.isspace() or (SKIP_TEXT_EXISTING and os.path.exists(filepath.replace(".json", ".txt"))):
         print(f"Skipping {filepath}")
         return
     with open(filepath.replace(".json", ".txt"), "w", encoding='utf-8') as file:

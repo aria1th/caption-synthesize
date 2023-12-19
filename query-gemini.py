@@ -1,5 +1,6 @@
 import pathlib
 import os
+import sys
 import json
 import glob
 import argparse
@@ -32,19 +33,18 @@ Thus you must include anything that is necessary to explain the image including 
 If tags are given, You must use the given tags, and reorder them to explain the image.
 You must not explain the unrecognized subject or features.
 
-You must include the given tags in RESPONSE
-You MUST try to use and reorder the given tags to construct sentences, instead of fully new sentences summary.
+You MUST use and REORDER the given tags to construct sentences.
 
-Inside RESPONSE, you should only include information about image itself. 
-
+Inside RESPONSE, you MUST include ALL TAGS given.
+The RESPONSE must end with "the rating is <RATING>." sentence.
 TAG:
 copyright: touhou
 character: hijiri_byakuren
 general tags: 1girl bangs black_dress blonde_hair blue_eyes blush breasts bridge brown_hair building closed_mouth cloud cross-laced_clothes day dress gradient_hair hair_between_eyes juliet_sleeves layered_dress long_hair long_sleeves looking_at_viewer medium_breasts mountain multicolored_hair outdoors puffy_sleeves purple_hair skirt_hold sky smile solo standing tree turtleneck very_long_hair wavy_hair white_dress
+rating: general
 
-RESPONSE :
-
-The character depicted is Hijiri Byakuren from the Touhou series, a 1girl solo standing on a bridge during the day. She has long, very_long_hair with gradient_hair transitioning from purple_hair at the top to blonde_hair at the ends. The sky is visible with a clear day, clouds, and a tree. Buildings, mountain, and outdoors show that the setting is a populated area. Byakuren has blue_eyes, blush on her cheeks, and is looking_at_viewer with a smile and closed_mouth. She is wearing a black_dress paired with a layered_dress and a white_dress beneath. The dress features cross-laced_clothes, turtleneck, long_sleeves, juliet_sleeves, and puffy_sleeves. She has medium_breasts, and is engaging in skirt_hold. Bangs and hair_between_eyes frame her face, and her wavy_hair adds texture to her hairstyle. She seems to have halo on her head, and the illustration is drawn with animation style.
+RESPONSE INCLUDES ALL TAGS GIVEN:
+The character depicted is Hijiri Byakuren from the Touhou series, a 1girl solo standing on a bridge during the day. She has long, very_long_hair with gradient_hair transitioning from purple_hair at the top to blonde_hair at the ends. The sky is visible with a clear day, clouds, and a tree. Buildings, mountain, and outdoors show that the setting is a populated area. Byakuren has blue_eyes, blush on her cheeks, and is looking_at_viewer with a smile and closed_mouth. She is wearing a black_dress paired with a layered_dress and a white_dress beneath. The dress features cross-laced_clothes, turtleneck, long_sleeves, juliet_sleeves, and puffy_sleeves. She has medium_breasts, and is engaging in skirt_hold. Bangs and hair_between_eyes frame her face, and her wavy_hair adds texture to her hairstyle. She seems to have halo on her head, and the illustration is drawn with animation style. The rating is safe.
 """
 
 def setup_model() -> genai.GenerativeModel:
@@ -94,11 +94,11 @@ def generate_text(image_path, return_input=False):
         image_inference(),
         tags_formatted('assets/04a0102966be49b7a97548994b228065.jpg'),
         image_inference('assets/04a0102966be49b7a97548994b228065.jpg'),
-        "RESPONSE:",
+        "RESPONSE INCLUDES ALL TAGS GIVEN:",
         read_result('assets/04a0102966be49b7a97548994b228065.jpg'),
         tags_formatted(image_path),
         image_inference(image_path),
-        "RESPONSE:",
+        "RESPONSE INCLUDES ALL TAGS GIVEN:",
     ]
     response = setup_model().generate_content(
         inputs,
@@ -157,11 +157,16 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', type=str, help='Path to the images folder')
+    # single file
+    parser.add_argument('--single-file', type=str, help='If given, query single file')
     parser.add_argument('--ext', type=str, default='.png', help='File extension of the image')
     parser.add_argument('--api_key', type=str, default=None, help='Google API Key')
     parser.add_argument('--threaded', action='store_true', help='Use threaded version')
     args = parser.parse_args()
     load_secret(args.api_key)
+    if args.single_file: # query single file
+        query_gemini_file(args.single_file)
+        sys.exit(0)
     if args.threaded:
         query_gemini_threaded(args.path, args.ext)
     else:
