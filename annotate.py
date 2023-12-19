@@ -64,32 +64,29 @@ def sanity_check(tags, caption):
     return tags_not_in_caption
     
 def create_block(default_path=None, default_annotation_dir=None, default_caption_type=None):
-    with gr.Blocks() as block:
+    with gr.Blocks(analytics_enabled=False) as block:
         with gr.Tab("Anntation") as tab:
-            show_image = gr.Image(type="pil", label="Image")
-            caption_index = gr.Number(value=0,label="Caption_idx",interactive=True)
+            with gr.Row():
+                show_image = gr.Image(type="pil", label="Image")
+                annotation_text_box = gr.Textbox(label="Annotation", interactive=True, lines=3)
+                
             path_input_box = gr.Textbox(label="Path to Images and tag/caption files", value=default_path)
             path_input_box.visible = not default_path # if default path is given, hide
             annotation_dir = gr.Textbox(label="Annotation dir", value=default_annotation_dir)
             annotation_dir.visible = not default_annotation_dir # if default path is given, hide
             caption_type = gr.Dropdown(label="Caption type", choices=['gpt4', 'gemini', 'custom'], value="gemini" if not default_caption_type else default_caption_type)
             caption_type.visible = not default_caption_type
-            
-            annotation_text_box = gr.Textbox(label="Annotation", interactive=True)
-            reference_text_box = gr.Textbox(label="Reference", interactive=False)
-            sanity_checkbox = gr.Textbox(label="Sanity check", interactive=False) # used for missing tags
-            
-            save_button = gr.Button(value="Save")
-            next_button = gr.Button(value="Next")
-            prev_button = gr.Button(value="Prev")
-            refresh_button = gr.Button(value="Refresh")
-            sanity_check_button = gr.Button(value="Sanity check")
-            
-            sanity_check_button.click(
-                sanity_check,
-                inputs=[reference_text_box, annotation_text_box],
-                outputs=[sanity_checkbox],
-            )
+            caption_index = gr.Number(value=0,label="Caption_idx",interactive=True)
+            reference_text_box = gr.Textbox(label="Reference", interactive=False, lines=5)
+            sanity_checkbox = gr.Textbox(label="Sanity check", interactive=False, lines=2) # used for missing tags
+            with gr.Row():
+                save_button = gr.Button(value="Save")
+            with gr.Row():
+                next_button = gr.Button(value="Next")
+                prev_button = gr.Button(value="Prev")
+            with gr.Row():
+                refresh_button = gr.Button(value="Refresh")
+                sanity_check_button = gr.Button(value="Sanity check")
             
             def refresh(path_input, caption_input, caption_type_selected):
                 caption_ext = {
@@ -108,7 +105,7 @@ def create_block(default_path=None, default_annotation_dir=None, default_caption
                 image_path = image_paths[int(caption_input)]
                 image, caption, tags = load_image(image_path, caption_ext, '.txt')
                 reference_text_box.value = tags
-                return image, caption, tags
+                return image, caption, tags, sanity_check(tags, caption)
             
             def refresh_next(caption_input, path_input, caption_type_selected):
                 result = refresh(path_input, caption_input + 1, caption_type_selected)
@@ -119,18 +116,22 @@ def create_block(default_path=None, default_annotation_dir=None, default_caption
             next_button.click(
                 refresh_next,
                 inputs=[caption_index, path_input_box, caption_type],
-                outputs=[caption_index, show_image, annotation_text_box, reference_text_box],
+                outputs=[caption_index, show_image, annotation_text_box, reference_text_box, sanity_checkbox],
             )
             prev_button.click(
                 fn=refresh_prev,
                 inputs=[caption_index, path_input_box, caption_type],
-                outputs=[caption_index, show_image, annotation_text_box, reference_text_box],
+                outputs=[caption_index, show_image, annotation_text_box, reference_text_box, sanity_checkbox],
             )
-            
+            sanity_check_button.click(
+                sanity_check,
+                inputs=[reference_text_box, annotation_text_box],
+                outputs=[sanity_checkbox],
+            )
             refresh_button.click(
                 refresh,
                 inputs=[path_input_box, caption_index, caption_type],
-                outputs=[show_image, annotation_text_box, reference_text_box],
+                outputs=[show_image, annotation_text_box, reference_text_box, sanity_checkbox],
             )
             def save(image_path, image, caption_index, annotation_dir, annotation_text):
                 image_paths = glob.glob(os.path.join(image_path, '*'))
