@@ -49,74 +49,109 @@ def save_captions(original_path, annotation_dir, image, caption):
     # copy image to annotation dir
     image.save(os.path.join(annotation_dir, filename))
 
+def sanity_check(tags, caption):
+    """
+    Checks if all tags are in the caption.
+    """
+    tags = tags.split('\n')
+    # tags start with something:, remove it
+    tags = [t.split(':', 1)[-1] for t in tags]
+    # remove empty tags
+    tags = [t for t in tags if t]
+    # as flat list
+    tags = [t for ts in tags for t in ts.split(' ')]
+    tags_not_in_caption = [t for t in tags if t not in caption]
+    return tags_not_in_caption
+    
+def create_block(default_path=None, default_annotation_dir=None, default_caption_type=None):
+    with gr.Blocks() as block:
+        with gr.Tab("Anntation") as tab:
+            show_image = gr.Image(type="pil", label="Image")
+            caption_index = gr.Number(value=0,label="Caption_idx",interactive=True)
+            path_input_box = gr.Textbox(label="Path to Images and tag/caption files", value=default_path)
+            path_input_box.visible = not default_path # if default path is given, hide
+            annotation_dir = gr.Textbox(label="Annotation dir", value=default_annotation_dir)
+            annotation_dir.visible = not default_annotation_dir # if default path is given, hide
+            caption_type = gr.Dropdown(label="Caption type", choices=['gpt4', 'gemini', 'custom'], value="gemini" if not default_caption_type else default_caption_type)
+            caption_type.visible = not default_caption_type
+            
+            annotation_text_box = gr.Textbox(label="Annotation", interactive=True)
+            reference_text_box = gr.Textbox(label="Reference", interactive=False)
+            sanity_checkbox = gr.Textbox(label="Sanity check", interactive=False) # used for missing tags
+            
+            save_button = gr.Button(value="Save")
+            next_button = gr.Button(value="Next")
+            prev_button = gr.Button(value="Prev")
+            refresh_button = gr.Button(value="Refresh")
+            sanity_check_button = gr.Button(value="Sanity check")
+            
+            sanity_check_button.click(
+                sanity_check,
+                inputs=[reference_text_box, annotation_text_box],
+                outputs=[sanity_checkbox],
+            )
+            
+            def refresh(path_input, caption_input, caption_type_selected):
+                caption_ext = {
+                    'gpt4' : '_gpt4.json',
+                    'gemini' : '_gemini.txt',
+                    'custom' : '.txt',
+                }[caption_type_selected]
+                path = path_input
+                #file_exts
+                image_paths = glob.glob(os.path.join(path, '*'))
+                image_paths = [p for p in image_paths if os.path.splitext(p)[-1] in file_exts]
+                # remove if no caption
+                image_paths = [p for p in image_paths if os.path.exists(p.replace(os.path.splitext(p)[-1], caption_ext))]
+                image_paths.sort()
+                #print(path)
+                image_path = image_paths[int(caption_input)]
+                image, caption, tags = load_image(image_path, caption_ext, '.txt')
+                reference_text_box.value = tags
+                return image, caption, tags
+            
+            def refresh_next(caption_input, path_input, caption_type_selected):
+                result = refresh(path_input, caption_input + 1, caption_type_selected)
+                return caption_input + 1, *result
+            def refresh_prev(caption_input, path_input, caption_type_selected):
+                result = refresh(path_input, caption_input - 1, caption_type_selected)
+                return caption_input - 1, *result
+            next_button.click(
+                refresh_next,
+                inputs=[caption_index, path_input_box, caption_type],
+                outputs=[caption_index, show_image, annotation_text_box, reference_text_box],
+            )
+            prev_button.click(
+                fn=refresh_prev,
+                inputs=[caption_index, path_input_box, caption_type],
+                outputs=[caption_index, show_image, annotation_text_box, reference_text_box],
+            )
+            
+            refresh_button.click(
+                refresh,
+                inputs=[path_input_box, caption_index, caption_type],
+                outputs=[show_image, annotation_text_box, reference_text_box],
+            )
+            def save(image_path, image, caption_index, annotation_dir, annotation_text):
+                image_paths = glob.glob(os.path.join(image_path, '*'))
+                image_paths = [p for p in image_paths if os.path.splitext(p)[-1] in file_exts]
+                image_paths.sort()
+                save_captions(image_paths[int(caption_index)], annotation_dir, image, annotation_text)
+            
+            save_button.click(
+                save,
+                inputs=[path_input_box, show_image, caption_index, annotation_dir, annotation_text_box],
+                outputs=[],
+            )
+    return block
+import argparse
 
-with gr.Blocks() as block:
-    with gr.Tab("Anntation") as tab:
-        show_image = gr.Image(type="pil", label="Image")
-        caption_index = gr.Number(value=0,label="Caption_idx",interactive=True)
-        path_input_box = gr.Textbox(label="Path to Images and tag/caption files")
-        annotation_dir = gr.Textbox(label="Annotation dir")
-        caption_type = gr.Dropdown(label="Caption type", choices=['gpt4', 'gemini', 'custom'])
-        
-        annotation_text_box = gr.Textbox(label="Annotation", interactive=True)
-        reference_text_box = gr.Textbox(label="Reference", interactive=False)
-        
-        save_button = gr.Button(value="Save")
-        next_button = gr.Button(value="Next")
-        prev_button = gr.Button(value="Prev")
-        refresh_button = gr.Button(value="Refresh")
-        
-        def refresh(path_input, caption_input, caption_type_selected):
-            caption_ext = {
-                'gpt4' : '_gpt4.json',
-                'gemini' : '_gemini.txt',
-                'custom' : '.txt',
-            }[caption_type_selected]
-            path = path_input
-            #file_exts
-            image_paths = glob.glob(os.path.join(path, '*'))
-            image_paths = [p for p in image_paths if os.path.splitext(p)[-1] in file_exts]
-            # remove if no caption
-            image_paths = [p for p in image_paths if os.path.exists(p.replace(os.path.splitext(p)[-1], caption_ext))]
-            image_paths.sort()
-            print(path)
-            image_path = image_paths[int(caption_input)]
-            image, caption, tags = load_image(image_path, caption_ext, '.txt')
-            reference_text_box.value = tags
-            return image, caption, tags
-        
-        def refresh_next(caption_input, path_input, caption_type_selected):
-            result = refresh(path_input, caption_input + 1, caption_type_selected)
-            return caption_input + 1, *result
-        def refresh_prev(caption_input, path_input, caption_type_selected):
-            result = refresh(path_input, caption_input - 1, caption_type_selected)
-            return caption_input - 1, *result
-        next_button.click(
-            refresh_next,
-            inputs=[caption_index, path_input_box, caption_type],
-            outputs=[caption_index, show_image, annotation_text_box, reference_text_box],
-        )
-        prev_button.click(
-            fn=refresh_prev,
-            inputs=[caption_index, path_input_box, caption_type],
-            outputs=[caption_index, show_image, annotation_text_box, reference_text_box],
-        )
-        
-        refresh_button.click(
-            refresh,
-            inputs=[path_input_box, caption_index, caption_type],
-            outputs=[show_image, annotation_text_box, reference_text_box],
-        )
-        def save(image_path, image, caption_index, annotation_dir, annotation_text):
-            image_paths = glob.glob(os.path.join(image_path, '*'))
-            image_paths = [p for p in image_paths if os.path.splitext(p)[-1] in file_exts]
-            image_paths.sort()
-            save_captions(image_paths[int(caption_index)], annotation_dir, image, annotation_text)
-        
-        save_button.click(
-            save,
-            inputs=[path_input_box, show_image, caption_index, annotation_dir, annotation_text_box],
-            outputs=[],
-        )
-
-block.launch()
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--path', type=str, help='Path to the images folder')
+    parser.add_argument('--annotation-dir', type=str, help='Path to the annotation folder')
+    parser.add_argument('--caption-type', type=str, help='Caption type')
+    parser.add_argument('--share', action='store_true', help='Share Gradio')
+    args = parser.parse_args()
+    block = create_block(args.path, args.annotation_dir, args.caption_type)
+    block.launch(share=args.share)
