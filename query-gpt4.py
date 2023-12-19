@@ -1,19 +1,27 @@
 import base64
-import requests
+import sys
 import os
 import json
-import tqdm
 import glob
 import argparse
+import requests
+import tqdm
+with open('secret.json', 'r',encoding='utf-8') as f:
+    try:
+        API_KEY = json.load(f)['OPENAI_API_KEY']
+    except KeyError:
+        print("Please put your API key in secret.json as OPENAI_API_KEY")
+        sys.exit(1)
 
+del f
 # OpenAI API Key
-API_KEY = "" #os.environ.get("OPENAI_API_KEY", None)
-assert API_KEY is not None, "Please set your OPENAI_API_KEY environment variable"
-
 # Function to encode the image
 def encode_image(image_path):
-  with open(image_path, "rb") as image_file:
-    return base64.b64encode(image_file.read()).decode('utf-8')
+    """
+    Encode the image to base64 string.
+    """
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
 
 
 TAGS_TEMPLATE = r"""
@@ -53,7 +61,7 @@ def query_image_with_tags(image_path, tags_txt):
     """
     base64_image = encode_image(image_path)
     # load tags
-    with open(tags_txt, 'r') as f:
+    with open(tags_txt, 'r',encoding='utf-8') as f:
         tags = f.read()
     base64_image = encode_image(image_path)
     
@@ -147,6 +155,10 @@ Start the response with RESPONSE: "<Put your response here>"
 
 DEBUG_LIMIT = 1000000
 def query_gpt4(path):
+    """
+    Query the GPT-4 model for given folder.
+    It is for images without .txt files.
+    """
     images = glob.glob(os.path.join(path, '*.png'))
     _i = 0
     for image in tqdm.tqdm(images):

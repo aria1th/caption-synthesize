@@ -1,4 +1,3 @@
-import tempfile
 from PIL import Image
 import gzip
 import os
