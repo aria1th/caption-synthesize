@@ -1,6 +1,11 @@
 import base64
 import requests
 import os
+import json
+import tqdm
+import glob
+import argparse
+
 # OpenAI API Key
 API_KEY = "" #os.environ.get("OPENAI_API_KEY", None)
 assert API_KEY is not None, "Please set your OPENAI_API_KEY environment variable"
@@ -140,10 +145,6 @@ Start the response with RESPONSE: "<Put your response here>"
 
     return response.json()
 
-import glob
-import tqdm
-import json
-
 DEBUG_LIMIT = 1000000
 def query_gpt4(path):
     images = glob.glob(os.path.join(path, '*.png'))
@@ -155,11 +156,16 @@ def query_gpt4(path):
         if os.path.exists(image.replace('.png', '.json')):
             continue
         data = query_image_with_text(image, "")
-        with open(image.replace('.png', '.json'), 'w') as f:
+        with open(image.replace('.png', '.json'), 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4)
         _i += 1
 
 def query_gpt4_with_tags(path, file_ext='.png'):
+    """
+    Query the GPT-4 model with the given image and tags.
+    Path should contain images as a.file_ext and tags as a.txt
+    Files will be saved as a_gpt4.json
+    """
     images = glob.glob(os.path.join(path, f'*{file_ext}'))
     _i = 0
     for image in tqdm.tqdm(images):
@@ -174,9 +180,14 @@ def query_gpt4_with_tags(path, file_ext='.png'):
             continue
         tags_txt = image.replace(file_ext, '.txt')
         data = query_image_with_tags(image, tags_txt)
-        with open(image.replace(file_ext, '_gpt4.json'), 'w') as f:
+        with open(image.replace(file_ext, '_gpt4.json'), 'w', encoding="utf-8") as f:
             json.dump(data, f, indent=4)
         _i += 1
 
+
 if __name__ == '__main__':
-    query_gpt4_with_tags(r"D:\aibooru_subset_g_100img", '.jpg')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--path', type=str, help='Path to the image')
+    parser.add_argument('--ext', type=str, default='.png', help='File extension of the image')
+    args = parser.parse_args()
+    query_gpt4_with_tags(args.path, args.ext)
