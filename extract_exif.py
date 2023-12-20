@@ -126,6 +126,9 @@ def read_info_from_image_stealth(image):
 
 import tqdm
 import json
+import re
+import sys
+
 PATH = r"F:\comfyui\ComfyUI\output\NAI_1215"
 def extract_exif(path):
     for file in tqdm.tqdm(glob.glob(os.path.join(path, '*.png'))):
@@ -150,7 +153,36 @@ def extract_exif_classify(path):
             #print("Moving to", target_path)
             os.rename(file, os.path.join(target_path, os.path.basename(file)))
             continue
-
+def extract_exif_classify_text(path, text, output_path=None, recursive=False):
+    # validate output path is not inside input path
+    if output_path and os.path.abspath(output_path).startswith(os.path.abspath(path)):
+        print("Output path cannot be inside input path")
+        return
+    # same drive limitation, WinError 17
+    if sys.platform == 'win32' and output_path and os.path.splitdrive(os.path.abspath(output_path))[0] != os.path.splitdrive(os.path.abspath(path))[0]:
+        print("Output path must be on the same drive as input path, windows limitation")
+        return
+    lists = []
+    if recursive:
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                if not file.endswith('.png'):
+                    continue
+                lists.append(os.path.join(root, file))
+    else:
+        lists = glob.glob(os.path.join(path, '*.png'))
+    for file in tqdm.tqdm(lists):
+        image = Image.open(file)
+        data = (read_info_from_image_stealth(image))
+        # match regex
+        if re.search(text, data, re.IGNORECASE):
+            # move to path / without_exif folder
+            target_path = os.path.join(output_path or path, 'matched')
+            if not os.path.exists(target_path):
+                os.makedirs(target_path)
+            #print("Moving to", target_path)
+            os.rename(file, os.path.join(target_path, os.path.basename(file)))
+            continue
 import gradio as gr
 
 def classify_image(img):
@@ -187,6 +219,16 @@ with gr.Blocks(analytics_enabled=False) as block:
         button.click(
             fn=extract_exif_classify,
             inputs=[inputs],
+        )
+    with gr.Tab("Classify Folder with matching prompt"):
+        inputs = gr.Textbox(label="Folder with Images")
+        text = gr.Textbox(label="Prompt")
+        output_path = gr.Textbox(label="Output Path")
+        recursive = gr.Checkbox(label="Recursive")
+        button = gr.Button(value="Extract")
+        button.click(
+            fn=extract_exif_classify_text,
+            inputs=[inputs, text, output_path, recursive],
         )
     with gr.Tab("Extract Text from Folder"):
         inputs = gr.Textbox(label="Folder with Images")
