@@ -142,6 +142,8 @@ def generate_text(image_path, return_input=False):
     previous_result = None
     image_extension = pathlib.Path(image_path).suffix
     if os.path.exists(image_path.replace(image_extension, '_gemini.txt')):
+        if not REFINE_ALLOWED:
+            raise FileExistsError(f"Refinement is not allowed, but {image_path.replace(image_extension, '_gemini.txt')} exists!")
         with open(image_path.replace(image_extension, '_gemini.txt'), 'r',encoding='utf-8') as f:
             try:
                 previous_result = f.read()
@@ -217,6 +219,9 @@ def query_gemini_file(image_path:str, optional_progress_bar:tqdm.tqdm = None):
         with open(image_path.replace(extension, '_gemini.txt'), 'w',encoding='utf-8') as f:
             f.write(text)
     except Exception as e:
+        if isinstance(e, FileExistsError):
+            optional_progress_bar.update(1)
+            return # skip
         print(f"Error occured while processing {image_path}!")
         print(e)
         raise e
@@ -253,8 +258,11 @@ if __name__ == '__main__':
     parser.add_argument('--threaded', action='store_true', help='Use threaded version')
     parser.add_argument('--max_threads', type=int, default=8, help='Max threads to use')
     parser.add_argument('--sleep_time', type=float, default=1.1, help='Sleep time between threads')
+    # REFINE_ALLOWED
+    parser.add_argument('--refine', action='store_true', help='Allow refinement')
     args = parser.parse_args()
     load_secret(args.api_key)
+    REFINE_ALLOWED = args.refine
     MAX_THREADS = args.max_threads
     if args.single_file: # query single file
         query_gemini_file(args.single_file)
