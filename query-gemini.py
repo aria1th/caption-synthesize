@@ -26,7 +26,7 @@ def load_secret(api_key=None):
 
 MODEL = None
 REFINE_ALLOWED = True
-TAGS_TEMPLATE = r"""
+INSTRUCTION_TEMPLATE = r"""
 Analyze the image in a comprehensive and detailed manner.
 The response will be used for constructing dataset in academic research. 
 Thus you must include anything that is necessary to explain the image including given tags.
@@ -39,6 +39,8 @@ You MUST use and REORDER the given tags to construct sentences.
 
 Inside RESPONSE, you MUST include ALL TAGS given.
 The RESPONSE must end with "the rating is <RATING>." sentence.
+"""
+TAGS_TEMPLATE = r"""
 TAG:
 copyright: touhou
 character: hijiri_byakuren
@@ -130,16 +132,17 @@ def generate_text(image_path, return_input=False):
     If previous result was given, we will use it as input.
     """
     inputs = [
-        TAGS_TEMPLATE,
-        image_inference(),
-        TEMPLATE_RESULT,
-        tags_formatted('assets/04a0102966be49b7a97548994b228065.jpg'),
-        image_inference('assets/04a0102966be49b7a97548994b228065.jpg'),
-        "RESPONSE INCLUDES ALL TAGS GIVEN:",
-        read_result('assets/04a0102966be49b7a97548994b228065.jpg'),
-        tags_formatted(image_path),
-        image_inference(image_path),
-        "RESPONSE INCLUDES ALL TAGS GIVEN:",
+        INSTRUCTION_TEMPLATE, # instruction for everything
+        TAGS_TEMPLATE, # tags example 1
+        image_inference(), # image example 1
+        TEMPLATE_RESULT, # result example 1
+        tags_formatted('assets/04a0102966be49b7a97548994b228065.jpg'), # tags example 2
+        image_inference('assets/04a0102966be49b7a97548994b228065.jpg'), # image example 2
+        "RESPONSE INCLUDES ALL TAGS GIVEN:", # result example 2
+        read_result('assets/04a0102966be49b7a97548994b228065.jpg'), # result example 2
+        tags_formatted(image_path), # tags given
+        image_inference(image_path), # image given
+        "RESPONSE INCLUDES ALL TAGS GIVEN:", # now generate
     ]
     previous_result = None
     image_extension = pathlib.Path(image_path).suffix
