@@ -181,7 +181,15 @@ def extract_exif_classify_text(path, text, output_path=None, recursive=False):
             if not os.path.exists(target_path):
                 os.makedirs(target_path)
             #print("Moving to", target_path)
-            os.rename(file, os.path.join(target_path, os.path.basename(file)))
+            # if file already exists, add number
+            if os.path.exists(os.path.join(target_path, os.path.basename(file))):
+                i = 1
+                filename_without_ext = os.path.splitext(os.path.basename(file))[0]
+                while os.path.exists(os.path.join(target_path, f"{filename_without_ext}_{i}.png")):
+                    i += 1
+                os.rename(file, os.path.join(target_path, f"{filename_without_ext}_{i}.png"))
+            else:
+                os.rename(file, os.path.join(target_path, os.path.basename(file)))
             continue
 import gradio as gr
 
