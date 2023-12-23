@@ -1,7 +1,43 @@
 from PIL import Image
 import gzip
 import os
+import tqdm
 import glob
+
+def convert_png_to_webp(path, remove_original=False, recursive=False):
+    """
+    Convert all png files to webp in given path.
+    """
+    images = []
+    if recursive:
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                if not file.endswith('.png'):
+                    continue
+                images.append(os.path.join(root, file))
+    else:
+        images = glob.glob(os.path.join(path, '*.png'))
+    pbar = tqdm.tqdm(total=len(images))
+    before_compress_sum = 0
+    after_compress_sum = 0
+    for image in images:
+        if not os.path.exists(image) or os.path.exists(image.replace('.png', '.webp')):
+            pbar.total -= 1
+            pbar.update(0)
+            continue
+        path_image = image
+        before_compress_sum += os.path.getsize(path_image)
+        try:
+            image = Image.open(path_image)
+            image.save(path_image.replace('.png', '.webp'), 'webp', optimize=True)
+            after_compress_sum += os.path.getsize(path_image.replace('.png', '.webp'))
+            pbar.update(1)
+            pbar.set_description(f"Before: {before_compress_sum / 1024 / 1024:.2f} MB, After: {after_compress_sum / 1024 / 1024:.2f} MB, compress ratio: {after_compress_sum / before_compress_sum * 100:.2f}%")
+            if remove_original:
+                os.remove(path_image)
+        except:
+            print("Error converting", path_image)
+            pbar.update(1)
 
 def read_info_from_image_stealth(image):
     # if tensor, convert to PIL image
@@ -244,6 +280,15 @@ with gr.Blocks(analytics_enabled=False) as block:
         button.click(
             fn=extract_exif,
             inputs=[inputs],
+        )
+    with gr.Tab("Convert PNG to WebP"):
+        inputs = gr.Textbox(label="Folder with Images")
+        button = gr.Button(value="Extract")
+        remove_original = gr.Checkbox(label="Remove original")
+        recursive = gr.Checkbox(label="Recursive")
+        button.click(
+            fn=convert_png_to_webp,
+            inputs=[inputs, remove_original, recursive],
         )
         
 
