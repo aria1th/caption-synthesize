@@ -1,7 +1,11 @@
 from PIL import Image
 import gzip
 import os
-import tqdm
+try:
+    from tqdm import tqdm
+except:
+    def tqdm(x, *args, **kwargs):
+        return x
 import glob
 
 def convert_png_to_webp(path, remove_original=False, recursive=False):
@@ -17,7 +21,7 @@ def convert_png_to_webp(path, remove_original=False, recursive=False):
                 images.append(os.path.join(root, file))
     else:
         images = glob.glob(os.path.join(path, '*.png'))
-    pbar = tqdm.tqdm(total=len(images))
+    pbar = tqdm(total=len(images))
     before_compress_sum = 0
     after_compress_sum = 0
     for image in images:
@@ -31,6 +35,41 @@ def convert_png_to_webp(path, remove_original=False, recursive=False):
             image = Image.open(path_image)
             image.save(path_image.replace('.png', '.webp'), 'webp', optimize=True)
             after_compress_sum += os.path.getsize(path_image.replace('.png', '.webp'))
+            pbar.update(1)
+            pbar.set_description(f"Before: {before_compress_sum / 1024 / 1024:.2f} MB, After: {after_compress_sum / 1024 / 1024:.2f} MB, compress ratio: {after_compress_sum / before_compress_sum * 100:.2f}%")
+            if remove_original:
+                os.remove(path_image)
+        except:
+            print("Error converting", path_image)
+            pbar.update(1)
+
+def convert_jpg_to_webp(path, remove_original=False, recursive=False):
+    """
+    Convert all jpg files to webp in given path.
+    """
+    images = []
+    if recursive:
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                if not file.endswith('.jpg'):
+                    continue
+                images.append(os.path.join(root, file))
+    else:
+        images = glob.glob(os.path.join(path, '*.jpg'))
+    pbar = tqdm(total=len(images))
+    before_compress_sum = 0
+    after_compress_sum = 0
+    for image in images:
+        if not os.path.exists(image) or os.path.exists(image.replace('.jpg', '.webp')):
+            pbar.total -= 1
+            pbar.update(0)
+            continue
+        path_image = image
+        before_compress_sum += os.path.getsize(path_image)
+        try:
+            image = Image.open(path_image)
+            image.save(path_image.replace('.jpg', '.webp'), 'webp', optimize=True)
+            after_compress_sum += os.path.getsize(path_image.replace('.jpg', '.webp'))
             pbar.update(1)
             pbar.set_description(f"Before: {before_compress_sum / 1024 / 1024:.2f} MB, After: {after_compress_sum / 1024 / 1024:.2f} MB, compress ratio: {after_compress_sum / before_compress_sum * 100:.2f}%")
             if remove_original:
@@ -167,7 +206,7 @@ import sys
 
 PATH = r"F:\comfyui\ComfyUI\output\NAI_1215"
 def extract_exif(path):
-    for file in tqdm.tqdm(glob.glob(os.path.join(path, '*.png'))):
+    for file in tqdm(glob.glob(os.path.join(path, '*.png'))):
         image = Image.open(file)
         data = (read_info_from_image_stealth(image))
         if not data:
@@ -178,7 +217,7 @@ def extract_exif(path):
             f.write(data)
 def extract_exif_classify(path):
     # instead of writing, if not exists, move to path / without_exif folder
-    for file in tqdm.tqdm(glob.glob(os.path.join(path, '*.png'))):
+    for file in tqdm(glob.glob(os.path.join(path, '*.png'))):
         image = Image.open(file)
         data = (read_info_from_image_stealth(image))
         if not data:
@@ -187,7 +226,14 @@ def extract_exif_classify(path):
             if not os.path.exists(target_path):
                 os.makedirs(target_path)
             #print("Moving to", target_path)
-            os.rename(file, os.path.join(target_path, os.path.basename(file)))
+            if os.path.exists(os.path.join(target_path, os.path.basename(file))):
+                i = 1
+                filename_without_ext = os.path.splitext(os.path.basename(file))[0]
+                while os.path.exists(os.path.join(target_path, f"{filename_without_ext}_{i}.png")):
+                    i += 1
+                os.rename(file, os.path.join(target_path, f"{filename_without_ext}_{i}.png"))
+            else:
+                os.rename(file, os.path.join(target_path, os.path.basename(file)))
             continue
 def extract_exif_classify_text(path, text, output_path=None, recursive=False):
     # validate output path is not inside input path
@@ -207,7 +253,7 @@ def extract_exif_classify_text(path, text, output_path=None, recursive=False):
                 lists.append(os.path.join(root, file))
     else:
         lists = glob.glob(os.path.join(path, '*.png'))
-    for file in tqdm.tqdm(lists):
+    for file in tqdm(lists):
         image = Image.open(file)
         data = (read_info_from_image_stealth(image))
         # match regex
@@ -288,6 +334,15 @@ with gr.Blocks(analytics_enabled=False) as block:
         recursive = gr.Checkbox(label="Recursive")
         button.click(
             fn=convert_png_to_webp,
+            inputs=[inputs, remove_original, recursive],
+        )
+    with gr.Tab("Convert JPG to WebP"):
+        inputs = gr.Textbox(label="Folder with Images")
+        button = gr.Button(value="Extract")
+        remove_original = gr.Checkbox(label="Remove original")
+        recursive = gr.Checkbox(label="Recursive")
+        button.click(
+            fn=convert_jpg_to_webp,
             inputs=[inputs, remove_original, recursive],
         )
         
