@@ -1,14 +1,21 @@
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import json
 import io
 import os
+import threading
+import time
 import requests
 from typing import Generator, List, Optional
 from tqdm import tqdm
 from PIL import Image
+import logging
+
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+    
+log_file = 'inference.log'
+logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 def download_image_web(image_url:str) -> Image.Image:
     """
@@ -21,6 +28,7 @@ def download_image_web(image_url:str) -> Image.Image:
     image_file = requests.get(image_url)
     # check response
     if image_file.status_code != 200:
+        logging.error(f"Image download failed with status code {image_file.status_code}")
         raise RuntimeError(f"Image download failed with status code {image_file.status_code}")
     image_file_content = image_file.content
     # return the image
@@ -52,8 +60,6 @@ def parse_args():
     arguments = parser.parse_args()
     return arguments
 
-model = None
-
 def format_text(text, tags:str=None):
     """
     Format text.
@@ -63,7 +69,7 @@ def format_text(text, tags:str=None):
     else:
         return text.replace("%tags", tags)
 
-def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, batch_size=4, stream=False, generation_params=None, dtype=torch.float32):
+def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, batch_size=4, stream=False, generation_params=None, dtype="float32"):
     """
     Inference.
     if stream is True, yield each result.
@@ -74,10 +80,11 @@ def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, b
     if part_len % batch_size != 0:
         chunk_size += 1
     _i = 0
-    with tqdm(total=part_len, desc='BATCH') as pbar:
+    with tqdm(range(chunk_size),total=part_len, desc='BATCH') as pbar:
         for i in pbar:
             print(f'{i}/{chunk_size}')
             subs = []
+            logging.info(f"Processing batch {i}")
             pbar.set_postfix_str(f'Preparing items...')
             for j in range(batch_size):
                 if i*batch_size+j < part_len:
@@ -88,7 +95,8 @@ def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, b
                     subs.append(model.vis_processor(image).unsqueeze(0))
             if len(subs) == 0:
                 break
-            pbars.set_postfix_str(f'Inference...')
+            logging.info(f"Batch {i} prepared")
+            pbar.set_postfix_str(f'Inference...')
             subs = torch.cat(subs, dim=0).cuda()
             tmp_bs = subs.shape[0]
             tmp_seg_emb1 = seg_emb1.repeat(tmp_bs, 1, 1)
@@ -110,6 +118,7 @@ def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, b
                                                             **generation_params
                                                             )
             pbar.set_postfix_str(f'Ended batch...')
+            logging.info(f"Batch {i} ended")
             for j, out in enumerate(out_embeds):
                 out[out == -1] = 2
                 response = model.decode_text([out])
@@ -137,7 +146,6 @@ def main(args):
     """
     Inference.
     """
-    global model
     default_generation_params = {
         "max_length": 500,
         "num_beams": 3,
@@ -147,23 +155,12 @@ def main(args):
         "length_penalty": 1.0,
         "temperature": 1.0,
     }
-    precision_map = {
-        "fp16" : torch.float16,
-        "bf16" : torch.bfloat16,
-        "fp32" : torch.float32,
-    }
-    precision = precision_map.get(args.precision, args.precision)
-    if model is None:
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name, trust_remote_code=True, cache_dir=args.cache_dir,
-            torch_dtype=precision)
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_name, device_map=args.device, trust_remote_code=True, cache_dir=args.cache_dir,
-            torch_dtype=precision).eval()
-        model.tokenizer = tokenizer
-
-    model.cuda()
-    model.half()
+    device = args.device
+    precision = args.precision
+    cache_dir = args.cache_dir
+    model_name = args.model_name
+    batch_size = args.batch_size
+    save_path = args.save_path
     # imgs : [path1, path2, ...]
     image_paths = []
     if args.single_image_url is not None:
@@ -183,9 +180,9 @@ def main(args):
                 imgs.append(os.path.join(args.image_dir, file))
                 img_paths.append(os.path.join(args.image_dir, file))
     if args.reference_tags_file:
-      # read
-      with open(args.reference_tags_file, 'r', encoding="utf-8") as f:
-        tags = json.load(f)
+        # read
+        with open(args.reference_tags_file, 'r', encoding="utf-8") as f:
+            tags = json.load(f)
     elif args.tag_txt:
         # read
         # in imgs, there are corresponding txt files with the same name or with prefix
@@ -207,32 +204,112 @@ def main(args):
             with open(txt_path, 'r', encoding="utf-8") as f:
                 tags.append(f.read())
     else:
-      tags = [None,] * len(imgs)
-    part_len = len(imgs)
+        tags = [None,] * len(imgs)
+    # Now image_paths and tags are ready
+    if "," in device:
+        device = device.split(",")
+        # add cuda: for each device
+        device = [f"cuda:{i}" for i in device if "cuda:" not in i]
+    elif "cuda:" in device:
+        device = [device]
+    elif device.isnumeric():
+        device = [f"cuda:{device}"]
+    else:
+        # Unfortunately, model does not support auto device
+        # we will use find all cuda devices and use all parallelly
+        raise NotImplementedError("Model does not support auto device")
+    # split tags, image_paths into chunks corresponding to devices
+    assert len(tags) == len(imgs), f"Number of tags {len(tags)} does not match number of images {len(imgs)}"
+    assert len(device) > 0, "No device is specified"
+    chunk_size = len(tags)//len(device)
+    tags_chunks = [list() for _ in range(len(device))]
+    image_paths_chunks = [list() for _ in range(len(device))]
+    for i in range(len(device)):
+        tags_chunks[i] = tags[i*chunk_size:(i+1)*chunk_size]
+        image_paths_chunks[i] = image_paths[i*chunk_size:(i+1)*chunk_size]
+    if len(tags) % len(device) != 0:
+        # add leftover to first device
+        tags_chunks[0].extend(tags[len(device)*chunk_size:])
+        image_paths_chunks[0].extend(image_paths[len(device)*chunk_size:])
+    assert sum([len(i) for i in tags_chunks]) == len(tags), "Tags chunks are not correct"
+    assert sum([len(i) for i in image_paths_chunks]) == len(image_paths), "Image paths chunks are not correct"
+    # inference
+    generation_params = default_generation_params
+    events = []
+    futures = []
+    with ProcessPoolExecutor(max_workers=len(device), initializer=torch.multiprocessing.set_sharing_strategy('file_system'), mp_context=torch.multiprocessing.get_context('spawn')) as executor:
+        for i in range(len(device)):
+            logging.info(f"Starting process {i} for device {device[i]}")
+            futures.append(executor.submit(log_infer_tags, model_name, cache_dir, precision, device[i], image_paths_chunks[i], batch_size, generation_params, tags_chunks[i], image_paths_chunks[i], save_path))
+    try:
+        for future in futures:
+            future.result()
+    except KeyboardInterrupt:
+        logging.info(f"KeyboardInterrupt, stopping...")
+        for event in events:
+            event.set()
 
+def log_infer_tags(*args, **kwargs):
+    """
+    Log inference.
+    """
+    try:
+        logging.info(f"Inference started")
+        infer_tags(*args, **kwargs)
+    except Exception as e:
+        logging.error(f"Inference failed with error {e} at {e.__traceback__}, device {kwargs.get('device', None)}")
+        raise e
+    finally:
+        logging.info(f"Inference finished")
+        event = kwargs.get("event", None)
+        if event is not None:
+            event.set()
+        return
+
+def infer_tags(model_name:str, cache_dir:str, precision:str, device:str, imgs:Generator, batch_size=4, generation_params=None, tags:List[Optional[str]]=None, image_paths:List[str]=None, save_path:str=None):
+    """
+    Inference.
+    """
+    # load model
+    os.environ["CUDA_VISIBLE_DEVICES"] = device.split(":")[-1]
+    precision_map = {
+        "fp16" : torch.float16,
+        "bf16" : torch.bfloat16,
+        "fp32" : torch.float32,
+    }
+    precision = precision_map.get(precision, precision)
+    logging.info(f"Loading model {model_name} on device {device}")
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name, trust_remote_code=True, cache_dir=cache_dir, device_map="cuda:0",
+        torch_dtype=precision)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name, device_map="cuda:0", trust_remote_code=True, cache_dir=cache_dir,
+        torch_dtype=precision).eval()
+    model.tokenizer = tokenizer
+    model.cuda()
+    logging.info(f"Model {model_name} loaded on device {device}")
     seg1 = '<|User|>:'
     seg2 = fr'''Analyze the image in a comprehensive and detailed manner.
 Reorder the following tags according to the image content.
 DO NOT ignore any tags.
+TAGS: 
 %tags
 {model.eoh}\n<|Bot|>:'''
     # use inference
     seg_emb1 = model.encode_text(seg1, add_special_tokens=True)
     imgs = active_yield_images(imgs) # generator
-    with torch.no_grad():
-        infer_results = inference(model, imgs, tags, seg2, seg_emb1, batch_size=args.batch_size, stream=True, generation_params=default_generation_params, dtype=precision)
+    infer_results = inference(model, imgs, tags, seg2, seg_emb1, batch_size=batch_size, stream=True, generation_params=generation_params, dtype=precision)
     _i = 0
     for responses in infer_results:
-        if args.save_path:
-            with open(args.save_path, 'a+', encoding='utf-8') as f:
-                json.dump({f"{image_paths[_i]}": responses}, f, ensure_ascii=False)
-                f.write('\n')
-        else:
-            print(f"{image_paths[_i]}: {responses}")
+        logging.info(f"Writing result {_i}")
+        with open(save_path, 'a+', encoding='utf-8') as f:
+            json.dump({f"{image_paths[_i]}": responses}, f, ensure_ascii=False)
+            f.write('\n')
         _i += 1
     print('Done')
 
 if __name__ == "__main__":
+    logging.info(f"Starting inference...")
     args = parse_args()
     main(args)
 
