@@ -91,11 +91,12 @@ def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, b
         for j in range(tmp_bs):
             emb2_list.append(model.encode_text(format_text(seg2, tags[i*batch_size+j]), add_special_tokens=False))
         # to dim 3
-        tmp_seg_emb2 = torch.stack(emb2_list, dim=0).cuda() # here is RuntimeError: Tensors must have same number of dimensions: got 3 and 4
-        
+        tmp_seg_emb2 = torch.stack(emb2_list, dim=0).squeeze(-1).cuda() #[1, 1, 160, 4096]
+        tmp_seg_emb2 = tmp_seg_emb2.squeeze(1)
         with torch.cuda.amp.autocast():
             with torch.no_grad():
                 subs = model.encode_img(subs)
+                # validate number of dims
                 input_emb = torch.cat(
                     [tmp_seg_emb1, subs, tmp_seg_emb2], dim=1)
                 out_embeds = model.internlm_model.generate(inputs_embeds=input_emb,
