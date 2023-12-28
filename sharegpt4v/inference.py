@@ -34,7 +34,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--model-name", type=str,
                         default="Lin-Chen/ShareCaptioner")
-    parser.add_argument("--images-file", type=str, default="images_to_describe.json",
+    parser.add_argument("--images-file", type=str, default=None,
                         help="a list, each element is a string for image path")
     parser.add_argument("--single-image-url", type=str, default=None) # for demo-like
     parser.add_argument("--save-path", type=str, default="captions.json")
@@ -44,6 +44,8 @@ def parse_args():
     parser.add_argument("--tag-txt", action="store_true", help="use txt files with the same name as images as tags")
     parser.add_argument("--tags-suffix", type=str, default="_tags")
     parser.add_argument("--image-dir", type=str, default=None)
+    # cache-dir
+    parser.add_argument("--cache-dir", type=str, default=None)
     
     arguments = parser.parse_args()
     return arguments
@@ -88,7 +90,8 @@ def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, b
         emb2_list = []
         for j in range(tmp_bs):
             emb2_list.append(model.encode_text(format_text(seg2, tags[i*batch_size+j]), add_special_tokens=False))
-        tmp_seg_emb2 = torch.stack(emb2_list, dim=0).cuda()
+        # to dim 3
+        tmp_seg_emb2 = torch.stack(emb2_list, dim=0).cuda() # here is RuntimeError: Tensors must have same number of dimensions: got 3 and 4
         
         with torch.cuda.amp.autocast():
             with torch.no_grad():
@@ -139,9 +142,9 @@ def main(args):
     }
     if model is None:
         tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name, trust_remote_code=True)
+            args.model_name, trust_remote_code=True, cache_dir=args.cache_dir)
         model = AutoModelForCausalLM.from_pretrained(
-            args.model_name, device_map=args.device, trust_remote_code=True).eval()
+            args.model_name, device_map=args.device, trust_remote_code=True, cache_dir=args.cache_dir).eval()
         model.tokenizer = tokenizer
 
     model.cuda()
@@ -163,7 +166,7 @@ def main(args):
         for file in os.listdir(args.image_dir):
             if file.endswith('.jpg') or file.endswith('.png') or file.endswith('.webp'):
                 imgs.append(os.path.join(args.image_dir, file))
-                img_paths.append(file)
+                img_paths.append(os.path.join(args.image_dir, file))
     if args.reference_tags_file:
       # read
       with open(args.reference_tags_file, 'r', encoding="utf-8") as f:
@@ -172,8 +175,11 @@ def main(args):
         # read
         # in imgs, there are corresponding txt files with the same name or with prefix
         tags = []
-        with open(args.images_file, 'r', encoding="utf-8") as f:
-          image_paths = json.load(f)
+        if args.images_file:
+            with open(args.images_file, 'r', encoding="utf-8") as f:
+                image_paths = json.load(f)
+        elif args.image_dir:
+            image_paths = img_paths
         for image_path in image_paths:
             # remove extension
             image_path = image_path.split('.')[0]
