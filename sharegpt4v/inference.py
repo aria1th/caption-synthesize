@@ -46,6 +46,8 @@ def parse_args():
     parser.add_argument("--image-dir", type=str, default=None)
     # cache-dir
     parser.add_argument("--cache-dir", type=str, default=None)
+    # floating point
+    parser.add_argument("--precision", type=str, default="bf16") # fp16, fp32, fp8?
     
     arguments = parser.parse_args()
     return arguments
@@ -61,7 +63,7 @@ def format_text(text, tags:str=None):
     else:
         return text.replace("%tags", tags)
 
-def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, batch_size=4, stream=False, generation_params=None):
+def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, batch_size=4, stream=False, generation_params=None, dtype=torch.float32):
     """
     Inference.
     if stream is True, yield each result.
@@ -72,44 +74,48 @@ def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, b
     if part_len % batch_size != 0:
         chunk_size += 1
     _i = 0
-    for i in tqdm(range(chunk_size), desc='BATCH'):
-        print(f'{i}/{chunk_size}')
-        subs = []
-        for j in tqdm(range(batch_size), desc='ITEMS'):
-            if i*batch_size+j < part_len:
-                try:
-                    image = next(imgs)
-                except StopIteration:
-                    break
-                subs.append(model.vis_processor(image).unsqueeze(0))
-        if len(subs) == 0:
-            break
-        subs = torch.cat(subs, dim=0).cuda()
-        tmp_bs = subs.shape[0]
-        tmp_seg_emb1 = seg_emb1.repeat(tmp_bs, 1, 1)
-        emb2_list = []
-        for j in range(tmp_bs):
-            emb2_list.append(model.encode_text(format_text(seg2, tags[i*batch_size+j]), add_special_tokens=False))
-        # to dim 3
-        tmp_seg_emb2 = torch.stack(emb2_list, dim=0).squeeze(-1).cuda() #[1, 1, 160, 4096]
-        tmp_seg_emb2 = tmp_seg_emb2.squeeze(1)
-        with torch.cuda.amp.autocast():
-            with torch.no_grad():
-                subs = model.encode_img(subs)
-                # validate number of dims
-                input_emb = torch.cat(
-                    [tmp_seg_emb1, subs, tmp_seg_emb2], dim=1)
-                out_embeds = model.internlm_model.generate(inputs_embeds=input_emb,
-                                                           eos_token_id=model.tokenizer.eos_token_id,
-                                                           num_return_sequences=1,
-                                                           **generation_params
-                                                           )
-        for j, out in enumerate(out_embeds):
-            out[out == -1] = 2
-            response = model.decode_text([out])
-            if stream:
-                yield response
-            captions.append(response)
+    with tqdm(total=part_len, desc='BATCH') as pbar:
+        for i in pbar:
+            print(f'{i}/{chunk_size}')
+            subs = []
+            pbar.set_postfix_str(f'Preparing items...')
+            for j in range(batch_size):
+                if i*batch_size+j < part_len:
+                    try:
+                        image = next(imgs)
+                    except StopIteration:
+                        break
+                    subs.append(model.vis_processor(image).unsqueeze(0))
+            if len(subs) == 0:
+                break
+            pbars.set_postfix_str(f'Inference...')
+            subs = torch.cat(subs, dim=0).cuda()
+            tmp_bs = subs.shape[0]
+            tmp_seg_emb1 = seg_emb1.repeat(tmp_bs, 1, 1)
+            emb2_list = []
+            for j in range(tmp_bs):
+                emb2_list.append(model.encode_text(format_text(seg2, tags[i*batch_size+j]), add_special_tokens=False))
+            # to dim 3
+            tmp_seg_emb2 = torch.stack(emb2_list, dim=0).squeeze(-1).cuda() #[1, 1, 160, 4096]
+            tmp_seg_emb2 = tmp_seg_emb2.squeeze(1)
+            with torch.cuda.amp.autocast():
+                with torch.no_grad():
+                    subs = model.encode_img(subs)
+                    # validate number of dims
+                    input_emb = torch.cat(
+                        [tmp_seg_emb1, subs, tmp_seg_emb2], dim=1).to(dtype=dtype)
+                    out_embeds = model.internlm_model.generate(inputs_embeds=input_emb,
+                                                            eos_token_id=model.tokenizer.eos_token_id,
+                                                            num_return_sequences=1,
+                                                            **generation_params
+                                                            )
+            pbar.set_postfix_str(f'Ended batch...')
+            for j, out in enumerate(out_embeds):
+                out[out == -1] = 2
+                response = model.decode_text([out])
+                if stream:
+                    yield response
+                captions.append(response)
     return captions
 
 def active_yield_images(image_path:List[str], max_workers = 4) -> Image.Image:
@@ -141,11 +147,19 @@ def main(args):
         "length_penalty": 1.0,
         "temperature": 1.0,
     }
+    precision_map = {
+        "fp16" : torch.float16,
+        "bf16" : torch.bfloat16,
+        "fp32" : torch.float32,
+    }
+    precision = precision_map.get(args.precision, args.precision)
     if model is None:
         tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name, trust_remote_code=True, cache_dir=args.cache_dir)
+            args.model_name, trust_remote_code=True, cache_dir=args.cache_dir,
+            torch_dtype=precision)
         model = AutoModelForCausalLM.from_pretrained(
-            args.model_name, device_map=args.device, trust_remote_code=True, cache_dir=args.cache_dir).eval()
+            args.model_name, device_map=args.device, trust_remote_code=True, cache_dir=args.cache_dir,
+            torch_dtype=precision).eval()
         model.tokenizer = tokenizer
 
     model.cuda()
@@ -205,7 +219,8 @@ DO NOT ignore any tags.
     # use inference
     seg_emb1 = model.encode_text(seg1, add_special_tokens=True)
     imgs = active_yield_images(imgs) # generator
-    infer_results = inference(model, imgs, tags, seg2, seg_emb1, batch_size=args.batch_size, stream=True, generation_params=default_generation_params)
+    with torch.no_grad():
+        infer_results = inference(model, imgs, tags, seg2, seg_emb1, batch_size=args.batch_size, stream=True, generation_params=default_generation_params, dtype=precision)
     _i = 0
     for responses in infer_results:
         if args.save_path:
@@ -214,6 +229,7 @@ DO NOT ignore any tags.
                 f.write('\n')
         else:
             print(f"{image_paths[_i]}: {responses}")
+        _i += 1
     print('Done')
 
 if __name__ == "__main__":
