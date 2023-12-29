@@ -107,7 +107,7 @@ def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, b
             max_length = 0
             for j in range(tmp_bs):
                 # pad with eoh to match length
-                encoded = model.encode_text(format_text(seg2, tags[i*batch_size+j]), add_special_tokens=False, pad_to_length=160)
+                encoded = model.encode_text(format_text(seg2, tags[i*batch_size+j]), add_special_tokens=False)
                 # get max length
                 max_length = max(max_length, encoded.shape[1])
                 emb2_list.append(encoded)
