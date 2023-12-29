@@ -12,6 +12,7 @@ from PIL import Image
 import logging
 
 import torch
+from torch.nn import DataParallel
 from transformers import AutoModelForCausalLM, AutoTokenizer
     
 log_file = 'inference.log'
@@ -39,7 +40,7 @@ def parse_args():
     Parse input arguments.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--model-name", type=str,
                         default="Lin-Chen/ShareCaptioner")
     parser.add_argument("--images-file", type=str, default=None,
@@ -56,7 +57,9 @@ def parse_args():
     parser.add_argument("--cache-dir", type=str, default=None)
     # floating point
     parser.add_argument("--precision", type=str, default="bf16") # fp16, fp32, fp8?
-    
+    #parser.add_argument("--data-parallel", action="store_true", help="use data parallel")
+    # for debugging / test, limit number of images
+    parser.add_argument("--images-limit", type=int, default=None)
     arguments = parser.parse_args()
     return arguments
 
@@ -101,8 +104,13 @@ def inference(model, imgs:Generator, tags:List[Optional[str]], seg2, seg_emb1, b
             tmp_bs = subs.shape[0]
             tmp_seg_emb1 = seg_emb1.repeat(tmp_bs, 1, 1)
             emb2_list = []
+            max_length = 0
             for j in range(tmp_bs):
-                emb2_list.append(model.encode_text(format_text(seg2, tags[i*batch_size+j]), add_special_tokens=False))
+                # pad with eoh to match length
+                encoded = model.encode_text(format_text(seg2, tags[i*batch_size+j]), add_special_tokens=False, pad_to_length=160)
+                # get max length
+                max_length = max(max_length, encoded.shape[1])
+                emb2_list.append(encoded)
             # to dim 3
             tmp_seg_emb2 = torch.stack(emb2_list, dim=0).squeeze(-1).cuda() #[1, 1, 160, 4096]
             tmp_seg_emb2 = tmp_seg_emb2.squeeze(1)
@@ -161,6 +169,8 @@ def main(args):
     model_name = args.model_name
     batch_size = args.batch_size
     save_path = args.save_path
+    #data_parallel = args.data_parallel
+    images_limit = args.images_limit
     # imgs : [path1, path2, ...]
     image_paths = []
     if args.single_image_url is not None:
@@ -205,6 +215,12 @@ def main(args):
                 tags.append(f.read())
     else:
         tags = [None,] * len(imgs)
+    # limit number of images if specified
+    if images_limit is not None:
+        logging.info(f"Limiting number of images to {images_limit}")
+        imgs = imgs[:images_limit]
+        tags = tags[:images_limit]
+        image_paths = image_paths[:images_limit]
     # Now image_paths and tags are ready
     if "," in device:
         device = device.split(",")
@@ -266,12 +282,31 @@ def log_infer_tags(*args, **kwargs):
             event.set()
         return
 
+class WrappedDataParallel(DataParallel):
+    """
+    Wrapped DataParallel.
+    """
+    def __init__(self, module, device_ids=None, output_device=None, dim=0):
+        super().__init__(module, device_ids=device_ids, output_device=output_device, dim=dim)
+        self.module = module
+
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.module, name)
+
 def infer_tags(model_name:str, cache_dir:str, precision:str, device:str, imgs:Generator, batch_size=4, generation_params=None, tags:List[Optional[str]]=None, image_paths:List[str]=None, save_path:str=None):
     """
     Inference.
     """
     # load model
-    os.environ["CUDA_VISIBLE_DEVICES"] = device.split(":")[-1]
+    if isinstance(device, list):
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([i.split(":")[-1] for i in device])
+        data_parallel = True
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = device.split(":")[-1]
+        data_parallel = False
     precision_map = {
         "fp16" : torch.float16,
         "bf16" : torch.bfloat16,
@@ -285,8 +320,12 @@ def infer_tags(model_name:str, cache_dir:str, precision:str, device:str, imgs:Ge
     model = AutoModelForCausalLM.from_pretrained(
         model_name, device_map="cuda:0", trust_remote_code=True, cache_dir=cache_dir,
         torch_dtype=precision).eval()
+    eoh = model.eoh
     model.tokenizer = tokenizer
     model.cuda()
+    if data_parallel:
+        model.internlm_model = WrappedDataParallel(model.internlm_model, device_ids=[int(i.split(":")[-1]) for i in device], output_device=int(device[0].split(":")[-1]))
+        model.internlm_model.to("cuda")
     logging.info(f"Model {model_name} loaded on device {device}")
     seg1 = '<|User|>:'
     seg2 = fr'''Analyze the image in a comprehensive and detailed manner.
@@ -294,7 +333,7 @@ Reorder the following tags according to the image content.
 DO NOT ignore any tags.
 TAGS: 
 %tags
-{model.eoh}\n<|Bot|>:'''
+{eoh}\n<|Bot|>:'''
     # use inference
     seg_emb1 = model.encode_text(seg1, add_special_tokens=True)
     imgs = active_yield_images(imgs) # generator
