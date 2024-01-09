@@ -4,16 +4,16 @@ import sys
 import json
 import glob
 import argparse
-from typing import List, Optional
+from typing import List, Optional, Union
 from PIL import Image
 import tqdm
 import google.generativeai as genai
 import time
-import threading
 
-def load_secret(api_key=None):
+def load_secret(api_key=None, path=None, ext=None, threaded=None, sleep_time=None, max_threads=None, load_env=True):
     """
-    Load the secret.json file.
+    Load the secret.json file and configure the genai.
+    Also tries to load the env.json file.
     """
     if api_key is None:
         with open('secret.json', 'r',encoding='utf-8') as f:
@@ -25,6 +25,19 @@ def load_secret(api_key=None):
         # OpenAI API Key
     else:
         genai.configure(api_key=api_key)
+    # load some defaults from the env.json
+    if load_env:
+        env = {}
+        with open('env.json', 'r',encoding='utf-8') as f:
+            env = json.load(f)
+        path = env.get('path', None) if path is None else path
+        # ext, threaded, sleep_time, max_threads
+        ext = env.get('ext', '.png') if ext is None else ext
+        threaded = env.get('threaded', False) if threaded is None else threaded
+        sleep_time = env.get('sleep_time', 1.1) if sleep_time is None else sleep_time
+        max_threads = env.get('max_threads', 8) if max_threads is None else max_threads
+        print(f"Loaded env.json, path: {path}, ext: {ext}, threaded: {threaded}, sleep_time: {sleep_time}, max_threads: {max_threads}")
+    return path, ext, threaded, sleep_time, max_threads
 
 MODEL = None
 REFINE_ALLOWED = True
@@ -166,6 +179,26 @@ def sanity_check(tags, result):
     #     return " ".join(tags_not_in_caption)
     return len(tags_not_in_caption) if tags_not_in_caption else None
 
+def merge_strings(strings_or_images:List[Union[str, Image.Image]]) -> str:
+    """
+    Merge strings or images into one string.
+    """
+    result_container = []
+    previous_string = ""
+    for s in strings_or_images:
+        if not isinstance(s, str):
+            result_container.append(previous_string)
+            result_container.append(s)
+            previous_string = ""
+        else:
+            # if not endswith \n and next string does not startswith \n then add \n
+            if previous_string and not previous_string.endswith('\n') and s and not s.startswith('\n'):
+                previous_string += '\n'
+            previous_string += s
+    if previous_string:
+        result_container.append(previous_string)
+    return result_container
+
 def generate_text(image_path, return_input=False):
     """
     Generate text from the given image and tags.
@@ -183,6 +216,8 @@ def generate_text(image_path, return_input=False):
         image_inference(image_path), # image given
         "RESPONSE INCLUDES ALL GIVEN TAGS:", # now generate
     ]
+    inputs = merge_strings(inputs)
+    #print(inputs)
     # previous_result = None
     # image_extension = pathlib.Path(image_path).suffix
     # if os.path.exists(image_path.replace(image_extension, '_gemini.txt')):
@@ -239,6 +274,8 @@ def generate_text(image_path, return_input=False):
         print(f"Error occured while generating text for {image_path}!")
         # print(f"Inputs: {inputs}")
         print(e)
+        if isinstance(e, KeyboardInterrupt):
+            raise e
 
     if return_input:
         return response, inputs
@@ -341,24 +378,26 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path', type=str, default='/Users/hoyeonmoon/Downloads/onoma/aibooru', help='Path to the images folder')
+    parser.add_argument('--path', type=str, default=None, help='Path to the images folder')
     # single file
     parser.add_argument('--single-file', type=str, help='If given, query single file')
     parser.add_argument('--ext', type=str, default='.png', help='File extension of the image')
-    parser.add_argument('--api_key', type=str, default='' , help='Google API Key')
+    parser.add_argument('--api_key', type=str, default=None, help='Google API Key')
     parser.add_argument('--threaded', action='store_true', help='Use threaded version')
     parser.add_argument('--max_threads', type=int, default=8, help='Max threads to use')
     parser.add_argument('--sleep_time', type=float, default=1.1, help='Sleep time between threads')
     # REFINE_ALLOWED
     parser.add_argument('--refine', action='store_true', help='Allow refinement')
+    # env
+    parser.add_argument('--load-env', action='store_true', help='Load env.json')
     args = parser.parse_args()
-    load_secret(args.api_key)
+    path, ext, threaded, max_threads, sleep_time = load_secret(args.api_key, args.path, args.ext, args.threaded, args.sleep_time, args.max_threads, args.load_env)
     REFINE_ALLOWED = args.refine
-    MAX_THREADS = args.max_threads
+    MAX_THREADS = max_threads
     if args.single_file: # query single file
         query_gemini_file(args.single_file)
         sys.exit(0)
     if args.threaded:
-        query_gemini_threaded(args.path, args.ext, args.sleep_time, args.max_threads)
+        query_gemini_threaded(path, ext, sleep_time, max_threads)
     else:
-        query_gemini(args.path, args.ext)
+        query_gemini(path, ext)
