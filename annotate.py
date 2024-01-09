@@ -7,6 +7,8 @@ import gradio as gr
 import json
 import os
 from PIL import Image
+import textdistance as td
+import re
 
 
 file_exts = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
@@ -53,16 +55,49 @@ def sanity_check(tags, caption):
     """
     Checks if all tags are in the caption.
     """
+    excluded_tags = ['original', 'error']
+    
     tags = tags.split('\n')
     # tags start with something:, remove it
     tags = [t.split(':', 1)[-1] for t in tags]
     # remove empty tags
     tags = [t for t in tags if t]
     # as flat list
-    tags = [t for ts in tags for t in ts.split(' ')]
-    tags_not_in_caption = [t for t in tags if t not in caption]
-    return tags_not_in_caption
+    # tags = [t for ts in tags for t in ts.split(' ')] 
+    tags = [t.replace('_', ' ').replace('-', ' ') for ts in tags for t in ts.split(' ')]
+    caption = caption.replace('_', ' ').replace('-', ' ')
+    split_caption = split_sentence(caption)
+
+
+    # Set a threshold for similarity
+    threshold = 0.13
+
+    # Check if any word has similarity above the threshold for each sentence
+    for t in tags:
+        for c in split_caption:
+            if td.levenshtein.normalized_similarity(t, c) >= threshold:
+                excluded_tags.append(t)
+            
+    # import pdb; pdb.set_trace()       
+    tags_with_parenthesis = [t for t in tags if '(' in t]
+    excluded_tags.extend(tags_with_parenthesis) 
+
+    if 'solo' in caption and '1girl' not in caption:
+        excluded_tags.append('1girl')
+    elif '1girl' in caption and 'solo' not in caption:
+        excluded_tags.append('solo')
+    elif 'kimono' in caption and 'yukata' not in caption:
+        excluded_tags.append('yukata')
+        
+    # remove underscores from caption as well
+    tags_not_in_caption = [t for t in tags if t.lower() not in caption.lower() and t not in excluded_tags] 
     
+    return tags_not_in_caption
+
+def split_sentence(sentence):
+    result = [token.strip() for token in re.split('[,\\s]*\\sand\\s|[.,]', sentence) if token.strip()]
+    return result
+
 def create_block(default_path=None, default_annotation_dir=None, default_caption_type=None):
     with gr.Blocks(analytics_enabled=False) as block:
         with gr.Tab("Anntation") as tab:
