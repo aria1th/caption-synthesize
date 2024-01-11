@@ -186,10 +186,11 @@ def query_gpt4_with_tags(path, file_ext='.png'):
         if _i > DEBUG_LIMIT:
             break
         # if json already exists, skip
-        if os.path.exists(image.replace(file_ext, '_gpt4.json')):
+        actual_file_ext = os.path.splitext(image)[1]
+        if os.path.exists(image.replace(actual_file_ext, '_gpt4.json')):
             print("Already exists")
             continue
-        if not os.path.exists(image.replace(file_ext, '.txt')):
+        if not os.path.exists(image.replace(actual_file_ext, '.txt')):
             print("No tags")
             continue
         # if not image, skip
@@ -200,9 +201,9 @@ def query_gpt4_with_tags(path, file_ext='.png'):
         except:
             print("Not an image")
             continue
-        tags_txt = image.replace(file_ext, '.txt')
+        tags_txt = image.replace(actual_file_ext, '.txt')
         data = query_image_with_tags(image, tags_txt)
-        with open(image.replace(file_ext, '_gpt4.json'), 'w', encoding="utf-8") as f:
+        with open(image.replace(actual_file_ext, '_gpt4.json'), 'w', encoding="utf-8") as f:
             json.dump(data, f, indent=4)
         _i += 1
 
