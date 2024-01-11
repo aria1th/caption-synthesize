@@ -7,6 +7,11 @@ import argparse
 import requests
 import tqdm
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor
+import logging
+
+log_file = 'query-gpt4.log'
+logging.basicConfig(filename=log_file, level=logging.ERROR, format='%(asctime)s %(levelname)s %(name)s %(message)s')
 
 with open('secret.json', 'r',encoding='utf-8') as f:
     try:
@@ -174,7 +179,19 @@ def query_gpt4(path):
             json.dump(data, f, indent=4)
         _i += 1
 
-def query_gpt4_with_tags(path, file_ext='.png'):
+def threaded_job(image, tags_txt, result_path, pbar=None):
+    try:
+        data = query_image_with_tags(image, tags_txt)
+        with open(result_path, 'w', encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+        logging.info(f"Successfully processed {image} to {result_path}")
+    except Exception as e:
+        logging.error(f"Error occured while processing {image}: {e}")
+    finally:
+        if pbar is not None:
+            pbar.update(1)
+
+def query_gpt4_with_tags(path, file_ext='.png', threads=1):
     """
     Query the GPT-4 model with the given image and tags.
     Path should contain images as a.file_ext and tags as a.txt
@@ -182,35 +199,41 @@ def query_gpt4_with_tags(path, file_ext='.png'):
     """
     images = glob.glob(os.path.join(path, f'*{file_ext}'))
     _i = 0
-    for image in tqdm.tqdm(images):
-        if _i > DEBUG_LIMIT:
-            break
-        # if json already exists, skip
-        actual_file_ext = os.path.splitext(image)[1]
-        if os.path.exists(image.replace(actual_file_ext, '_gpt4.json')):
-            print("Already exists")
-            continue
-        if not os.path.exists(image.replace(actual_file_ext, '.txt')):
-            print("No tags")
-            continue
-        # if not image, skip
-        try:
-            im =Image.open(image)
-            # validate if it is not corrupted
-            im.verify()
-        except:
-            print("Not an image")
-            continue
-        tags_txt = image.replace(actual_file_ext, '.txt')
-        data = query_image_with_tags(image, tags_txt)
-        with open(image.replace(actual_file_ext, '_gpt4.json'), 'w', encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
-        _i += 1
-
+    pbar = tqdm.tqdm(images)
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        for image in images:
+            if _i > DEBUG_LIMIT:
+                break
+            # if json already exists, skip
+            actual_file_ext = os.path.splitext(image)[1]
+            if os.path.exists(image.replace(actual_file_ext, '_gpt4.json')):
+                print(f"Already exists: {image.replace(actual_file_ext, '_gpt4.json')}")
+                logging.info(f"Already exists: {image.replace(actual_file_ext, '_gpt4.json')}")
+                continue
+            if not os.path.exists(image.replace(actual_file_ext, '.txt')):
+                print(f"Tags not found: {image.replace(actual_file_ext, '.txt')}")
+                logging.info(f"Tags not found: {image.replace(actual_file_ext, '.txt')}")
+                continue
+            # if not image, skip
+            try:
+                im =Image.open(image)
+                # validate if it is not corrupted
+                im.verify()
+            except Exception as e:
+                if isinstance(e, KeyboardInterrupt):
+                    sys.exit(1)
+                print(f"Image is corrupted: {image}")
+                continue
+            tags_txt = image.replace(actual_file_ext, '.txt')
+            if threads==1:
+                threaded_job(image, tags_txt, image.replace(actual_file_ext, '_gpt4.json'), pbar)
+            else:
+                executor.submit(threaded_job, image, tags_txt, image.replace(actual_file_ext, '_gpt4.json'), pbar)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', type=str, help='Path to the image')
     parser.add_argument('--ext', type=str, default='.png', help='File extension of the image, use .* for all')
+    parser.add_argument("--threads", type=int, default=1, help="Number of threads to use")
     args = parser.parse_args()
     query_gpt4_with_tags(args.path, args.ext)
