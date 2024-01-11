@@ -6,6 +6,8 @@ import glob
 import argparse
 import requests
 import tqdm
+from PIL import Image
+
 with open('secret.json', 'r',encoding='utf-8') as f:
     try:
         API_KEY = json.load(f)['OPENAI_API_KEY']
@@ -190,6 +192,14 @@ def query_gpt4_with_tags(path, file_ext='.png'):
         if not os.path.exists(image.replace(file_ext, '.txt')):
             print("No tags")
             continue
+        # if not image, skip
+        try:
+            im =Image.open(image)
+            # validate if it is not corrupted
+            im.verify()
+        except:
+            print("Not an image")
+            continue
         tags_txt = image.replace(file_ext, '.txt')
         data = query_image_with_tags(image, tags_txt)
         with open(image.replace(file_ext, '_gpt4.json'), 'w', encoding="utf-8") as f:
@@ -200,6 +210,6 @@ def query_gpt4_with_tags(path, file_ext='.png'):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', type=str, help='Path to the image')
-    parser.add_argument('--ext', type=str, default='.png', help='File extension of the image')
+    parser.add_argument('--ext', type=str, default='.png', help='File extension of the image, use .* for all')
     args = parser.parse_args()
     query_gpt4_with_tags(args.path, args.ext)
