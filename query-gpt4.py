@@ -236,4 +236,4 @@ if __name__ == '__main__':
     parser.add_argument('--ext', type=str, default='.png', help='File extension of the image, use .* for all')
     parser.add_argument("--threads", type=int, default=1, help="Number of threads to use")
     args = parser.parse_args()
-    query_gpt4_with_tags(args.path, args.ext)
+    query_gpt4_with_tags(args.path, args.ext, args.threads)
