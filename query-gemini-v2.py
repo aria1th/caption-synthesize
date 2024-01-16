@@ -44,6 +44,9 @@ def image_inference(image_path=None):
     """
     if image_path is None:
         image_path = "assets/5841101.jpg"
+    if not os.path.exists(image_path):
+        print(f"Image not found: {image_path}")
+        return
     image = Image.open(image_path)
     image = image.convert("RGB")
     return image
@@ -144,6 +147,8 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
     If previous result was given, we will use it as input.
     """
     # read txt tag file and if tag has 'solo' then use solo template
+    if image_path.endswith('.txt') or image_path.endswith('.json'):
+        return None
     extension = pathlib.Path(image_path).suffix
     with open(image_path.replace(extension, '.txt'), 'r',encoding='utf-8') as f:
         tags = f.read()
@@ -183,9 +188,8 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
             except Exception as e:
                 if isinstance(e, KeyboardInterrupt):
                     raise e
-                print(f"Error occured while generating text for {image_path}!")
+                print(f"Error occured while generating text for {image_path}! {e}")
                 print(f"Inputs: {inputs}")
-                print(e)
             return previous_result
         
         else:
@@ -206,9 +210,10 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
             raise e
         print(f"Error occurred while generating text for {image_path}! {e}")
         print(f"Inputs: {inputs}")
+        return None
     return previous_result
 
-def query_gemini(path:str, extension:str = '.png', api_key=None, proxy=None, proxy_auth=None, repeat_count:int = 3):
+def query_gemini(path:str, extension:str = '.png', api_key=None, proxy=None, proxy_auth=None, repeat_count:int = 3, max_retries=5):
     """
     Query gemini with the given image path.
     """
@@ -217,7 +222,7 @@ def query_gemini(path:str, extension:str = '.png', api_key=None, proxy=None, pro
         print(f"No files found for {os.path.join(path, f'*{extension}')}!")
         return
     for file in tqdm.tqdm(files):
-        query_gemini_file(file, None, repeats=repeat_count, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth)
+        query_gemini_file(file, None, repeats=repeat_count, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
 
 def generate_repeat_text(image_path:str, previous_result:str, api_key=None, proxy=None, proxy_auth=None,repeats=3) -> List[str]:
     """
@@ -226,6 +231,7 @@ def generate_repeat_text(image_path:str, previous_result:str, api_key=None, prox
     results = []
     for _ in range(repeats):
         results.append(generate_text(image_path, return_input=True, previous_result=previous_result, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth))
+    results = [result for result in results if result is not None]
     return results
 
 def query_gemini_file(image_path:str, optional_progress_bar:tqdm.tqdm = None, max_retries=5, repeats=3, api_key=None, proxy=None, proxy_auth=None):
@@ -262,7 +268,7 @@ def query_gemini_file(image_path:str, optional_progress_bar:tqdm.tqdm = None, ma
                 optional_progress_bar.update(1)
                 return # skip
             print(f"Error occured while processing {image_path}!")
-            print(e)
+            print(f"Error: {e}")
             print(f"\nAttempt: {attempt}")
             if attempt < max_retries:
                 print("trying again in 2 seconds...")
@@ -274,21 +280,19 @@ def query_gemini_file(image_path:str, optional_progress_bar:tqdm.tqdm = None, ma
             if optional_progress_bar is not None:
                 optional_progress_bar.update(1)
 
-def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1.1, max_threads:int = 10, repeat_count:int = 3, api_key=None, proxy=None, proxy_auth=None):
+def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1.1, max_threads:int = 10, repeat_count:int = 3, api_key=None, proxy=None, proxy_auth=None, max_retries=5):
     """
     Query gemini with the given image path.
     For all extensions, use extension='.*'
     """
     files = load_paths(path, extension)
-    # exclude files that ends with txt or json
-    files = [f for f in files if not f.endswith('.txt') and not f.endswith('.json')]
     if not files:
         print(f"No files found for {os.path.join(path, f'*{extension}')}!")
         return
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
         pbar = tqdm.tqdm(total=len(files))
         for file in files:
-            executor.submit(query_gemini_file, file, pbar, repeats=3, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth)
+            executor.submit(query_gemini_file, file, pbar, repeats=3, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
             time.sleep(sleep_time * repeat_count)
 
 def load_paths(string:str, extension:str=".png") -> List[str]:
@@ -306,6 +310,8 @@ def load_paths(string:str, extension:str=".png") -> List[str]:
                 paths = json.load(f)
     else:
         paths = glob.glob(os.path.join(string, f'*{extension}'))
+    # filter out txt and json
+    paths = [path for path in paths if not path.endswith('.txt') and not path.endswith('.json')]
     return paths
 
 if __name__ == '__main__':
@@ -332,6 +338,6 @@ if __name__ == '__main__':
         sys.exit(0)
     if args.threaded:
         # python query-gemini-v2.py --path assets --ext .png --api_key <api_key> --threaded
-        query_gemini_threaded(args.path, args.ext, args.sleep_time, args.max_threads, args.repeat_count, api_key=api_arg, proxy=args.proxy, proxy_auth=args.proxy_auth)
+        query_gemini_threaded(args.path, args.ext, args.sleep_time, args.max_threads, args.repeat_count, api_key=api_arg, proxy=args.proxy, proxy_auth=args.proxy_auth, max_retries=args.max_retries)
     else:
-        query_gemini(args.path, args.ext, api_key=api_arg, proxy=args.proxy, proxy_auth=args.proxy_auth, repeat_count=args.repeat_count)
+        query_gemini(args.path, args.ext, api_key=api_arg, proxy=args.proxy, proxy_auth=args.proxy_auth, repeat_count=args.repeat_count, max_retries=args.max_retries)

@@ -132,7 +132,7 @@ class ImageItem(Item):
             mime_type = "image/jpeg"
         # to bytes
         with BytesIO() as output:
-            self.image_or_path.save(output, format=self.image_or_path.format)
+            self.image_or_path.save(output, format=self.image_or_path.format or "JPEG")
             encoded_image = base64.b64encode(output.getvalue())
         return encoded_image.decode("utf-8"), mime_type
 
