@@ -35,8 +35,8 @@ class MultiTurnData(JsonSerializable):
         else:
             assert all(isinstance(item, TurnDataPart) for item in iterable_or_item), f"iterable_or_item must be TurnDataPart or Iterable[TurnDataPart], not {type(iterable_or_item)}"
             self.data = iterable_or_item
-    def json(self) -> dict:
-        return [item.json() for item in self.data]
+    def json(self, exclude_image:bool=False) -> dict:
+        return [item.json(exclude_image=exclude_image) for item in self.data]
 
 class TurnDataPart(JsonSerializable):
     """
@@ -79,7 +79,7 @@ class StringItem(Item):
     def __init__(self, text: str) -> None:
         assert isinstance(text, str), f"text must be str, not {type(text)}"
         self.text = text
-    def json(self) -> dict:
+    def json(self,exclude_image:bool=False) -> dict:
         return {"text": str(self.text)}
 
 class ImageItem(Item):
@@ -136,7 +136,9 @@ class ImageItem(Item):
             encoded_image = base64.b64encode(output.getvalue())
         return encoded_image.decode("utf-8"), mime_type
 
-    def json(self) -> dict:
+    def json(self,exclude_image:bool=False) -> dict:
+        if exclude_image:
+            return {"text": "<image>"}
         if isinstance(self.image_or_path, Image.Image):
             encoded_image, mime_type = self._load_image()
         elif self.image_or_path.startswith("http"):
@@ -165,7 +167,7 @@ class GenerationConfig(JsonSerializable):
         "temperature": 0.1,
         "topK": 32,
         "topP": 1,
-        "maxOutputTokens": 4096,
+        "maxOutputTokens": 8192,
     }
     def __init__(self, **kwargs) -> None:
         self.data = GenerationConfig.data
@@ -215,9 +217,9 @@ class GenerationRequest(JsonSerializable):
         self.config = config
         self.safety_settings = safety_settings
 
-    def json(self) -> dict:
+    def json(self, exclude_image:bool=False) -> dict:
         return {
-            "contents": self.data.json(),
+            "contents": self.data.json(exclude_image=exclude_image),
             "generationConfig": self.config.json(),
             "safety_settings": self.safety_settings.json()
         }
@@ -247,11 +249,15 @@ def generate_request_args(conversation_context:Iterable[Union[str, Image.Image]]
     }
     return args
 
-def generate_request(conversation_context:Iterable[Union[str, Image.Image]], api_key:str, proxy:Optional[str]=None, proxy_auth:Optional[str]=None) -> dict:
+def generate_request(conversation_context:Iterable[Union[str, Image.Image]], api_key:str, proxy:Optional[str]=None, proxy_auth:Optional[str]=None, dump_path:Optional[str]=None) -> dict:
     """
     Generates request
     """
     args = generate_request_args(conversation_context, api_key)
+    if dump_path:
+        with open(dump_path, "w", encoding="utf-8") as f:
+            generation_request = GenerationRequest.load(conversation_context)
+            f.write(json.dumps(generation_request.json(exclude_image=True), indent=4)) # exclude image
     if proxy:
         session = requests.Session()
         if proxy_auth:

@@ -171,6 +171,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
     if not os.path.exists(image_path.replace(extension, '.txt')):
         print(f"Tags not found for {image_path}!")
         raise FileNotFoundError(f"Tags not found for {image_path}!")
+    dump_path = image_path.replace(extension, '_gemini_request.txt')
     with open(image_path.replace(extension, '.txt'), 'r',encoding='utf-8') as f:
         tags = f.read()
     tags = get_tags_list(tags)
@@ -200,7 +201,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
             inputs = merge_strings(inputs)
             response = None
             try:
-                response = generate_request(inputs, api_key, proxy=proxy, proxy_auth=proxy_auth)
+                response = generate_request(inputs, api_key, proxy=proxy, proxy_auth=proxy_auth, dump_path=dump_path)
                 candidates = analyze_model_response(response)
                 if len(candidates) > 1:
                     print("WARNING: Multiple candidates found! You can use multiple responses to generate the final response.")
