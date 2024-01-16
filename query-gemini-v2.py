@@ -51,6 +51,13 @@ def image_inference(image_path=None):
         return
     image = Image.open(image_path)
     image = image.convert("RGB")
+    # resize if bigger than 768*768
+    if image.size[0] > 768 and image.size[1] > 768:
+        # resize to shorter side 768
+        if image.size[0] > image.size[1]:
+            image = image.resize((768, int(768 * image.size[1] / image.size[0])))
+        else:
+            image = image.resize((int(768 * image.size[0] / image.size[1]), 768))
     return image
 
 @cache
