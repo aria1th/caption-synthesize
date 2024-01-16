@@ -290,11 +290,11 @@ def analyze_model_response(response:dict) -> dict:
         raise ValueError('Invalid response: no candidates')
     candidates = [c for c in response['candidates'] if c['finishReason'] == 'STOP']
     if not candidates:
-        raise ValueError('Invalid response: no STOP candidates')
+        raise ValueError(f'Invalid response: no STOP candidates, try increasing max_output_tokens, candidates: {response["candidates"]}')
     filtered = [filter_candidates(c) for c in candidates]
     filtered = [f for f in filtered if f]
     if not filtered:
-        raise ValueError('Invalid response: no filtered candidates')
+        raise ValueError('Invalid response: no filtered candidates, response did not contain any text')
     return filtered
 
 def filter_candidates(candidate:dict) -> str:
