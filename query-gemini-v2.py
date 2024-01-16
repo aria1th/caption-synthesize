@@ -177,7 +177,6 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
         if len(tags_not_in_caption):
             inputs.append(format_missing_tags(previous_result, tags_not_in_caption))
             inputs = merge_strings(inputs)
-            print(inputs)
             response = None
             try:
                 response = generate_request(inputs, api_key, proxy=proxy, proxy_auth=proxy_auth)
