@@ -12,6 +12,8 @@ import tqdm
 from concurrent.futures import ThreadPoolExecutor
 from converter import generate_request, analyze_model_response
 
+POLICY = 'default' # default, skip_existing
+
 def load_secret(api_key=None):
     """
     If api_key is not given,
@@ -193,7 +195,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
                 # dump response if exists
                 if response:
                     with open(image_path.replace(extension, '_gemini_error.txt'), 'w', encoding='utf-8') as f:
-                        f.write(response)
+                        f.write(str(response))
             return previous_result
         
         else:
@@ -226,6 +228,10 @@ def query_gemini(path:str, extension:str = '.png', api_key=None, proxy=None, pro
         print(f"No files found for {os.path.join(path, f'*{extension}')}!")
         return
     for file in tqdm.tqdm(files):
+        actual_extension = pathlib.Path(file).suffix
+        result_expected_file = file.replace(actual_extension, '_gemini.txt')
+        if POLICY == 'skip_existing' and os.path.exists(result_expected_file):
+            continue
         query_gemini_file(file, None, repeats=repeat_count, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
 
 def generate_repeat_text(image_path:str, previous_result:str, api_key=None, proxy=None, proxy_auth=None,repeats=3) -> List[str]:
@@ -250,6 +256,7 @@ def query_gemini_file(image_path:str, optional_progress_bar:tqdm.tqdm = None, ma
     least_sanity_count = float('inf')
     best_text = None
     sanity_count_list = []
+    # if exists, skip by policy
     for attempt in range (max_retries + 1):
         try:
             texts = generate_repeat_text(image_path, best_text, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, repeats=repeats)
@@ -298,6 +305,11 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
         pbar = tqdm.tqdm(total=len(files))
         for file in files:
+            actual_extension = pathlib.Path(file).suffix
+            result_expected_file = file.replace(actual_extension, '_gemini.txt')
+            if POLICY == 'skip_existing' and os.path.exists(result_expected_file):
+                pbar.update(1)
+                continue
             executor.submit(query_gemini_file, file, pbar, repeats=3, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
             time.sleep(sleep_time * repeat_count)
 
@@ -334,8 +346,11 @@ if __name__ == '__main__':
     parser.add_argument('--proxy_auth', type=str, default=None, help='Proxy auth to use')
     parser.add_argument('--repeat_count', type=int, default=3, help='Repeat count to use')
     parser.add_argument('--max_retries', type=int, default=5, help='Max retries to use')
+    # policy, skip_existing, default
+    parser.add_argument('--policy', type=str, default='default', help='Policy to use, skip_existing, default')
     args = parser.parse_args()
     api_arg = args.api_key
+    POLICY = args.policy
     api_arg = load_secret(api_arg)
     MAX_THREADS = args.max_threads
     if args.single_file: # query single file
