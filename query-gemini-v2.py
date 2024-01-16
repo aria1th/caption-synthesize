@@ -9,10 +9,20 @@ import time
 from functools import cache
 from PIL import Image
 import tqdm
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from converter import generate_request, analyze_model_response
 
 POLICY = 'default' # default, skip_existing
+
+commit_time_dict = {}
+def wait_for_commit(proxy=None):
+    """
+    Wait for commit time to pass.
+    """
+    while time.time() - commit_time_dict.get(proxy, 0) < 1.1:
+        time.sleep(0.05)
+    commit_time_dict[proxy] = time.time()
+    return
 
 def load_secret(api_key=None):
     """
@@ -201,6 +211,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
             inputs = merge_strings(inputs)
             response = None
             try:
+                wait_for_commit(proxy=proxy)
                 response = generate_request(inputs, api_key, proxy=proxy, proxy_auth=proxy_auth, dump_path=dump_path)
                 candidates = analyze_model_response(response)
                 if len(candidates) > 1:
@@ -329,6 +340,7 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
     if not files:
         print(f"No files found for {os.path.join(path, f'*{extension}')}!")
         return
+    futures = []
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
         pbar = tqdm.tqdm(total=len(files))
         for file in files:
@@ -341,8 +353,16 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
                 print(f"File not found: {file}")
                 pbar.update(1)
                 continue
-            executor.submit(query_gemini_file, file, pbar, repeats=3, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
-            time.sleep(sleep_time * repeat_count)
+            future = executor.submit(query_gemini_file, file, pbar, repeats=3, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
+            futures.append(future)
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Error occured while processing {future}!")
+                print(f"Error: {e}")
+                print(future.result())
+                continue
 
 def load_paths(string:str, extension:str=".png") -> List[str]:
     """
