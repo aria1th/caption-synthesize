@@ -4,7 +4,7 @@ import sys
 import json
 import glob
 import argparse
-from typing import List, Union
+from typing import List, Optional, Union
 import time
 from functools import cache
 from PIL import Image
@@ -234,13 +234,15 @@ def query_gemini(path:str, extension:str = '.png', api_key=None, proxy=None, pro
             continue
         query_gemini_file(file, None, repeats=repeat_count, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
 
-def generate_repeat_text(image_path:str, previous_result:str, api_key=None, proxy=None, proxy_auth=None,repeats=3) -> List[str]:
+def generate_repeat_text(image_path:str, previous_result:str, api_key=None, proxy=None, proxy_auth=None,repeats=3, result_container:Optional[List] = None) -> List[str]:
     """
     Generates the repeat text from the given image path and previous result.
     """
     results = []
     for _ in range(repeats):
         results.append(generate_text(image_path, return_input=True, previous_result=previous_result, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth))
+        if result_container is not None:
+            result_container.append(results[-1])
         if results[-1] is not None:
             previous_result = results[-1]
     results = [result for result in results if result is not None]
@@ -258,14 +260,16 @@ def query_gemini_file(image_path:str, optional_progress_bar:tqdm.tqdm = None, ma
     sanity_count_list = []
     # if exists, skip by policy
     for attempt in range (max_retries + 1):
+        all_generated_texts = []
         try:
-            texts = generate_repeat_text(image_path, best_text, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, repeats=repeats)
-            sanity_checks = [sanity_check(tags_formatted(image_path), text) for text in texts]
+            texts = generate_repeat_text(image_path, best_text, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, repeats=repeats, result_container= all_generated_texts)
+            sanity_checks = [sanity_check(tags_formatted(image_path), text) for text in all_generated_texts]
             sanity_count_list = [len(sanity_check) for sanity_check in sanity_checks]
+            if not sanity_count_list:
+                print(f"Sanity check failed for {image_path}!")
+                raise ValueError("Empty sanity check list! Responses were not generated!")
             least_sanity_count = min(sanity_count_list)
-            
             best_text = texts[sanity_count_list.index(least_sanity_count)]
-
             if best_text is not None:
                 with open(image_path.replace(extension, '_gemini.txt'), 'w', encoding='utf-8') as f:
                     f.write(best_text)
