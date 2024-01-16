@@ -178,6 +178,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
             inputs.append(format_missing_tags(previous_result, tags_not_in_caption))
             inputs = merge_strings(inputs)
             print(inputs)
+            response = None
             try:
                 response = generate_request(inputs, api_key, proxy=proxy, proxy_auth=proxy_auth)
                 candidates = analyze_model_response(response)
@@ -188,8 +189,12 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
             except Exception as e:
                 if isinstance(e, KeyboardInterrupt):
                     raise e
-                print(f"Error occured while generating text for {image_path}! {e}")
+                print(f"Error occured while generating text for {image_path}!")
                 print(f"Inputs: {inputs}")
+                # dump response if exists
+                if response:
+                    with open(image_path.replace(extension, '_gemini_error.txt'), 'w', encoding='utf-8') as f:
+                        f.write(response)
             return previous_result
         
         else:
@@ -231,6 +236,8 @@ def generate_repeat_text(image_path:str, previous_result:str, api_key=None, prox
     results = []
     for _ in range(repeats):
         results.append(generate_text(image_path, return_input=True, previous_result=previous_result, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth))
+        if results[-1] is not None:
+            previous_result = results[-1]
     results = [result for result in results if result is not None]
     return results
 
