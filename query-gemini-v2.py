@@ -14,8 +14,9 @@ from converter import generate_request, analyze_model_response
 
 def load_secret(api_key=None):
     """
-    Load the secret.json file and configure the genai.
-    Also tries to load the env.json file.
+    If api_key is not given,
+    Load the secret.json file from the current directory.
+    Else, use the given api_key.
     """
     if not api_key:
         with open('secret.json', 'r',encoding='utf-8') as f:
@@ -110,39 +111,29 @@ def merge_strings(strings_or_images:List[Union[str, Image.Image]]) -> str:
         result_container.append(previous_string)
     return result_container
 
-def load_instruction_templates_from_json(json_file_path, solo:bool=False):
+def load_instruction_templates_from_json(json_file_path, key:str = "INSTRUCTION_TEMPLATE"):
     """
     Loads the instruction template from the given json file path.
     """
     if not json_file_path or not os.path.exists(json_file_path):
         raise FileNotFoundError(f"Instruction file not found: {json_file_path}")
     ### TODO: convert to conditional template
-    if solo:
-        with open(json_file_path, 'r',encoding='utf-8') as file:
-            templates = json.load(file)
-            instruction = templates.get("INSTRUCTION_TEMPLATE")
-    else:
-        with open(json_file_path, 'r',encoding='utf-8') as file:
-            templates = json.load(file)
-            instruction = templates.get("INSTRUCTION_TEMPLATE_MULTIPLE")
+    with open(json_file_path, 'r',encoding='utf-8') as file:
+        templates = json.load(file)
+        instruction = templates.get(key)
     return instruction
 
-def load_tag_templates_from_json(json_file_path, solo:bool =False):
+def load_tag_templates_from_json(json_file_path, key:str = "TAGS_TEMPLATE"):
     """
     Loads the tag template from the given json file path.
+    Corresponding result template should be given with the key + "_RESULT".
     """
     if not json_file_path or not os.path.exists(json_file_path):
         raise FileNotFoundError(f"Tag template file not found: {json_file_path}")
-    if solo:
-        with open(json_file_path, 'r',encoding='utf-8') as file:
-            templates = json.load(file)
-            tag_template = templates.get("TAGS_TEMPLATE_1")
-            template_result = templates.get("TEMPLATE_RESULT_1")
-    else:
-        with open(json_file_path, 'r',encoding='utf-8') as file:
-            templates = json.load(file)
-            tag_template = templates.get("TAGS_TEMPLATE_MULTIPLE")
-            template_result = templates.get("TEMPLATE_RESULT_MULTIPLE")
+    with open(json_file_path, 'r',encoding='utf-8') as file:
+        templates = json.load(file)
+        tag_template = templates.get(key)
+        template_result = templates.get(key + "_RESULT")
     return tag_template, template_result
 
 
@@ -158,13 +149,12 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
         tags = f.read()
     tags = get_tags_list(tags)
     if 'solo' in tags and 'solo_focus' not in tags:
-        raise NotImplementedError("Handler for solo but wihtout solo focus not implemented yet!")
-        instruction = load_instruction_templates_from_json('', solo=True)
-        tags_template, template_result = load_tag_templates_from_json('', solo=True)
+        instruction = load_instruction_templates_from_json('Templates/instruction.json', 'INSTRUCTION_TEMPLATE')
+        tags_template, template_result = load_tag_templates_from_json('Templates/tag_results.json','TAGS_TEMPLATE')
     else:
         print("Multiple people detected!")
-        instruction = load_instruction_templates_from_json('Templates/instruction.json', solo=False)
-        tags_template, template_result = load_tag_templates_from_json('Templates/tag_results.json', solo=False)
+        instruction = load_instruction_templates_from_json('Templates/instruction.json', 'INSTRUCTION_TEMPLATE_MULTIPLE')
+        tags_template, template_result = load_tag_templates_from_json('Templates/tag_results.json', 'TAGS_TEMPLATE_MULTIPLE')
     ### TODO : convert to Factory pattern
     inputs = [
         instruction, # instruction for everything

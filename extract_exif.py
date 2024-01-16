@@ -7,7 +7,9 @@ except:
     def tqdm(x, *args, **kwargs):
         return x
 import glob
-
+import json
+import re
+import sys
 def convert_png_to_webp(path, remove_original=False, recursive=False):
     """
     Convert all png files to webp in given path.
@@ -199,10 +201,7 @@ def read_info_from_image_stealth(image):
             pass
     return str(geninfo)
 
-import tqdm
-import json
-import re
-import sys
+
 
 PATH = r"F:\comfyui\ComfyUI\output\NAI_1215"
 def extract_exif(path):
@@ -218,8 +217,11 @@ def extract_exif(path):
 def extract_exif_classify(path):
     # instead of writing, if not exists, move to path / without_exif folder
     for file in tqdm(glob.glob(os.path.join(path, '*.png'))):
-        image = Image.open(file)
-        data = (read_info_from_image_stealth(image))
+        try:
+            image = Image.open(file)
+            data = (read_info_from_image_stealth(image))
+        except:
+            continue
         if not data:
             # move to path / without_exif folder
             target_path = os.path.join(path, 'without_exif')
