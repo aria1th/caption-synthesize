@@ -202,7 +202,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
             except Exception as e:
                 if isinstance(e, KeyboardInterrupt):
                     raise e
-                print(f"Error occured while generating text for {image_path}!")
+                print(f"Error occured while generating text for {image_path}! {e}")
                 print(f"Inputs: {inputs}")
                 # dump response if exists
                 if response:
