@@ -112,6 +112,7 @@ if __name__ == "__main__":
     parser.add_argument('--repeat_count', type=int, default=3, help='Repeat count.')
     parser.add_argument('--max_retries', type=int, default=0, help='Max retries.')
     parser.add_argument('--policy', type=str, default="default", help='Policy for skipping, skip_exist, default')
+    parser.add_argument('--api_keys_count', type=int, default=1, help='Number of api keys to use.')
     args = parser.parse_args()
     # check folder_path exists
     api_file = args.api_file
@@ -121,6 +122,8 @@ if __name__ == "__main__":
     with open(api_file, 'r', encoding="utf-8") as f:
         api_keys = f.readlines()
     api_keys = [api_key.strip() for api_key in api_keys]
+    api_keys = api_keys[:args.api_keys_count]
+    assert len(api_keys) > 0, "No api keys"
     print(f"Loaded {len(api_keys)} api keys")
     if not os.path.exists(args.folder_path):
         print(f"folder_path: {args.folder_path} does not exist")
