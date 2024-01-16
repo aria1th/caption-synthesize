@@ -285,6 +285,8 @@ def analyze_model_response(response:dict) -> dict:
     Analyzes model response. Raises if error.
     """
     if 'candidates' not in response:
+        if 'error' in response:
+            raise ValueError(f"Error in response: {response['error']}")
         raise ValueError('Invalid response: no candidates')
     candidates = [c for c in response['candidates'] if c['finishReason'] == 'STOP']
     if not candidates:
