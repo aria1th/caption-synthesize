@@ -247,25 +247,16 @@ def generate_request_args(conversation_context:Iterable[Union[str, Image.Image]]
     }
     return args
 
-def generate_request(conversation_context:Iterable[Union[str, Image.Image]], api_key:str) -> dict:
+def generate_request(conversation_context:Iterable[Union[str, Image.Image]], api_key:str, proxy:Optional[str]=None, proxy_auth:Optional[str]=None) -> dict:
     """
     Generates request
     """
     args = generate_request_args(conversation_context, api_key)
-    response = requests.post(url=args["url"], headers=args["headers"], data=json.dumps(args["data"]).replace("''","'"))
-    return response.json()
-
-def test_request(api_key:str, proxy:Optional[str] = None, proxy_auth:Optional[str]=None) -> dict:
-    """
-    Tests request
-    """
-    args = generate_request_args(["hello",Image.open(r"assets/02de52e6b87389bd182a943c02492565.jpg"), "world"], api_key)
-    print(args)
     if proxy:
         session = requests.Session()
         if proxy_auth:
             session.auth = tuple(proxy_auth.split(":"))
-        # curl -X POST -H 'Content-Type: application/json' -d '{GenerationRequest.load(["hello",Image.open(r"assets/02de52e6b87389bd182a943c02492565.jpg"), "world"]).json()}' http://localhost:8000/post_response
+        # curl -X POST -H 'Content-Type: application/json' -d '{GenerationRequest.load(conversation_context).json()}' http://localhost:8000/post_response
         url = args.pop("url")
         response = session.post(proxy, data={"args_json" : json.dumps(args), "url": url})
         status = response.status_code
@@ -282,8 +273,43 @@ def test_request(api_key:str, proxy:Optional[str] = None, proxy_auth:Optional[st
     response = requests.post(url=args["url"], headers=args["headers"], data=json.dumps(args["data"]))
     return response.json()
 
+def test_request(api_key:str, proxy:Optional[str] = None, proxy_auth:Optional[str]=None) -> dict:
+    """
+    Tests request
+    """
+    context = ["hello",Image.open(r"assets/02de52e6b87389bd182a943c02492565.jpg"), "world"]
+    return generate_request(context, api_key, proxy, proxy_auth)
+
+def analyze_model_response(response:dict) -> dict:
+    """
+    Analyzes model response. Raises if error.
+    """
+    if 'candidates' not in response:
+        raise ValueError('Invalid response: no candidates')
+    candidates = [c for c in response['candidates'] if c['finishReason'] == 'STOP']
+    if not candidates:
+        raise ValueError('Invalid response: no STOP candidates')
+    filtered = [filter_candidates(c) for c in candidates]
+    filtered = [f for f in filtered if f]
+    if not filtered:
+        raise ValueError('Invalid response: no filtered candidates')
+    return filtered
+
+def filter_candidates(candidate:dict) -> str:
+    string = ""
+    content = candidate['content']
+    if 'parts' not in content:
+        return string
+    for part in content['parts']:
+        if 'text' not in part:
+            continue
+        string += part['text']
+    return string
+
 if __name__ == "__main__":
-    secrets = json.load(open("secret.json", "r"))
-    api_key = secrets["GOOGLE_API_KEY"]
-    #print(test_request(api_key))
-    print(test_request(api_key, proxy="http://localhost:8000/post_response", proxy_auth="user:password_notdefault"))
+    secrets = json.load(open("secret.json", "r", encoding="utf-8"))
+    cached_api_key = secrets["GOOGLE_API_KEY"]
+    result = test_request(api_key=cached_api_key)
+    text = analyze_model_response(result)
+    print(text)
+    #print(test_request(api_key=cached_api_key, proxy="http://localhost:8000/post_response", proxy_auth="user:password_notdefault"))
