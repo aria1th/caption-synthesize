@@ -247,17 +247,30 @@ def generate_request_args(conversation_context:Iterable[Union[str, Image.Image]]
     }
     return args
 
-def test_request(api_key:str, proxy:Optional[str] = None) -> dict:
+def generate_request(conversation_context:Iterable[Union[str, Image.Image]], api_key:str) -> dict:
+    """
+    Generates request
+    """
+    args = generate_request_args(conversation_context, api_key)
+    response = requests.post(url=args["url"], headers=args["headers"], data=json.dumps(args["data"]).replace("''","'"))
+    return response.json()
+
+def test_request(api_key:str, proxy:Optional[str] = None, proxy_auth:Optional[str]=None) -> dict:
     """
     Tests request
     """
     args = generate_request_args(["hello",Image.open(r"assets/02de52e6b87389bd182a943c02492565.jpg"), "world"], api_key)
     print(args)
     if proxy:
-        response = requests.post(proxy, data=json.dumps(args).replace("''","'"))
+        session = requests.Session()
+        if proxy_auth:
+            session.auth = tuple(proxy_auth.split(":"))
+        # curl -X POST -H 'Content-Type: application/json' -d '{GenerationRequest.load(["hello",Image.open(r"assets/02de52e6b87389bd182a943c02492565.jpg"), "world"]).json()}' http://localhost:8000/post_response
+        url = args.pop("url")
+        response = session.post(proxy, data={"args_json" : json.dumps(args), "url": url})
         status = response.status_code
         if status != 200:
-            raise requests.exceptions.HTTPError(f"Proxy returned status code {status}")
+            raise requests.exceptions.HTTPError(f"Proxy returned status code {status}, error {response.text}")
         else:
             response_json = response.json()
             # get success
@@ -266,10 +279,11 @@ def test_request(api_key:str, proxy:Optional[str] = None) -> dict:
                 raise requests.exceptions.HTTPError(f"Proxy returned success {success}, error {response_json.get('response')}")
             else:
                 return json.loads(response_json.get("response"))
-    response = requests.post(url=args["url"], headers=args["headers"], data=json.dumps(args["data"]).replace("''","'"))
+    response = requests.post(url=args["url"], headers=args["headers"], data=json.dumps(args["data"]))
     return response.json()
 
 if __name__ == "__main__":
     secrets = json.load(open("secret.json", "r"))
     api_key = secrets["GOOGLE_API_KEY"]
-    print(test_request(api_key))
+    #print(test_request(api_key))
+    print(test_request(api_key, proxy="http://localhost:8000/post_response", proxy_auth="user:password_notdefault"))
