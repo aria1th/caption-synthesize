@@ -48,8 +48,8 @@ class TurnDataPart(JsonSerializable):
         else:
             assert all(isinstance(item, Item) for item in iterable_or_item), f"iterable_or_item must be Item or Iterable[Item], not {type(iterable_or_item)}"
             self.data = iterable_or_item
-    def json(self, role:Optional[str] = None) -> dict:
-        jsonpart = {"parts": [item.json() for item in self.data]}
+    def json(self, role:Optional[str] = None, exclude_image:bool=False) -> dict:
+        jsonpart = {"parts": [item.json(exclude_image=exclude_image) for item in self.data]}
         if role:
             assert isinstance(role, str), f"role must be str, not {type(role)}"
             jsonpart["role"] = role
@@ -69,8 +69,8 @@ class Item(JsonSerializable):
             self.item = item
         else:
             raise TypeError(f"Item must be str or JsonSerializable, not {type(item)}")
-    def json(self) -> dict:
-        return self.item.json()
+    def json(self,exclude_image:bool=False) -> dict:
+        return self.item.json(exclude_image=exclude_image)
 
 class StringItem(Item):
     """
