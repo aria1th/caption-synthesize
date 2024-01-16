@@ -123,6 +123,9 @@ def merge_strings(strings_or_images:List[Union[str, Image.Image]]) -> str:
             result_container.append(previous_string)
             result_container.append(s)
             previous_string = ""
+        elif s.startswith('Role@'):
+            result_container.append(previous_string)
+            previous_string = s
         else:
             # if not endswith \n and next string does not startswith \n then add \n
             if previous_string and not previous_string.endswith('\n') and s and not s.startswith('\n'):

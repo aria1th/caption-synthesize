@@ -4,9 +4,10 @@ Converts gemini generate request into CURL requestable json
 
 from abc import ABC, abstractmethod
 from io import BytesIO
+import re
 import json
 import os
-from typing import Iterable, Optional, Union
+from typing import Iterable, List, Optional, Union
 import requests
 import base64
 from PIL import Image
@@ -42,7 +43,8 @@ class TurnDataPart(JsonSerializable):
     """
     Single part of the turn data
     """
-    def __init__(self, iterable_or_item: Union[Iterable["Item"], "Item"]) -> None:
+    def __init__(self, iterable_or_item: Union[Iterable["Item"], "Item"], role:str="user") -> None:
+        self.role = role
         if isinstance(iterable_or_item, Item):
             self.data = [iterable_or_item]
         else:
@@ -51,8 +53,9 @@ class TurnDataPart(JsonSerializable):
     def json(self, role:Optional[str] = None, exclude_image:bool=False) -> dict:
         jsonpart = {"parts": [item.json(exclude_image=exclude_image) for item in self.data]}
         if role:
-            assert isinstance(role, str), f"role must be str, not {type(role)}"
             jsonpart["role"] = role
+        else:
+            jsonpart["role"] = self.role
         return jsonpart
 
 class Item(JsonSerializable):
@@ -230,10 +233,26 @@ class GenerationRequest(JsonSerializable):
         Loads GenerationRequest from conversation_context
         """
         assert all(isinstance(item, (str, Image.Image)) for item in conversation_context), f"conversation_context must be Iterable[str] or Iterable[Image.Image], not {type(conversation_context)}"
-        data = MultiTurnData([TurnDataPart([Item(item) for item in conversation_context])])
+        turn_parts = []
+        for item, role in GenerationRequest.handle_special_token(conversation_context):
+            part = TurnDataPart(Item(item), role=role)
+            turn_parts.append(part)
+        data = MultiTurnData(turn_parts)
         config = GenerationConfig()
         safety_settings = SafetySettings()
         return GenerationRequest(data, config, safety_settings)
+
+    @staticmethod
+    def handle_special_token(context:Iterable[Union[str, Image.Image]]) -> Iterable[Union[str, Image.Image]]:
+        """
+        The string may start with Role@<role>@, which is a special token.
+        """
+        for item in context:
+            if isinstance(item, str) and item.startswith("Role@"):
+                role, item = item.split("@", 2)[1:]
+                yield item, role
+            else:
+                yield item, "user"
 
 def generate_request_args(conversation_context:Iterable[Union[str, Image.Image]], api_key:str) -> str:
     """
@@ -279,12 +298,42 @@ def generate_request(conversation_context:Iterable[Union[str, Image.Image]], api
     response = requests.post(url=args["url"], headers=args["headers"], data=json.dumps(args["data"]))
     return response.json()
 
+def merge_strings(strings_or_images:List[Union[str, Image.Image]]) -> str:
+    """
+    Merge strings or images into one string. This makes single-turn conversation.
+    """
+    result_container = []
+    previous_string = ""
+    for s in strings_or_images:
+        if not isinstance(s, str):
+            result_container.append(previous_string)
+            result_container.append(s)
+            previous_string = ""
+        elif s.startswith('Role@'):
+            result_container.append(previous_string)
+            previous_string = s
+        else:
+            # if not endswith \n and next string does not startswith \n then add \n
+            if previous_string and not previous_string.endswith('\n') and s and not s.startswith('\n'):
+                previous_string += '\n'
+            previous_string += s
+    if previous_string:
+        result_container.append(previous_string)
+    return result_container
+
 def test_request(api_key:str, proxy:Optional[str] = None, proxy_auth:Optional[str]=None) -> dict:
     """
     Tests request
     """
     context = ["hello",Image.open(r"assets/02de52e6b87389bd182a943c02492565.jpg"), "world"]
     return generate_request(context, api_key, proxy, proxy_auth)
+def test_request_role(api_key:str, proxy:Optional[str] = None, proxy_auth:Optional[str]=None) -> dict:
+    """
+    Tests request
+    """
+    context = ["Role@user@hello",Image.open(r"assets/02de52e6b87389bd182a943c02492565.jpg"), "Role@model@world"]
+    request_data = GenerationRequest.load(context).json(exclude_image=True)
+    print(json.dumps(request_data, indent=4))
 
 def analyze_model_response(response:dict) -> dict:
     """
@@ -315,6 +364,9 @@ def filter_candidates(candidate:dict) -> str:
     return string
 
 if __name__ == "__main__":
+    test_request_role("api_key")
+    print(merge_strings(["hello",Image.open(r"assets/02de52e6b87389bd182a943c02492565.jpg"), "world"]))
+    print(merge_strings(["hello",Image.open(r"assets/02de52e6b87389bd182a943c02492565.jpg"),"bcva","d","rr", "Role@model@world"]))
     secrets = json.load(open("secret.json", "r", encoding="utf-8"))
     cached_api_key = secrets["GOOGLE_API_KEY"]
     result = test_request(api_key=cached_api_key)
