@@ -5,7 +5,8 @@ import subprocess
 import sys
 import datetime
 from typing import List
-from collections import repeat
+# repeat
+from itertools import repeat
 import threading
 import argparse
 
@@ -53,7 +54,7 @@ def execute_command(command, event):
     if rc != 0:
         print(f"Error: {rc}")
 
-def split_and_execute(folder_path:str, proxy_file:str, proxy_auth:str, num:int, sleep_time:int, repeat_count:int, max_retries:int):
+def split_and_execute(folder_path:str, proxy_file:str, proxy_auth:str, num:int, sleep_time:int, repeat_count:int, max_retries:int, policy:str, max_threads:int=10) -> None:
     """
     Split the folder_path into num parts, execute query-gemini-v2.py for each part.
     """
@@ -72,7 +73,7 @@ def split_and_execute(folder_path:str, proxy_file:str, proxy_auth:str, num:int, 
         api_key = api_keys[i]
         print(f"temp_path: {temp_path}")
         print(f"api_key: {api_key}")
-        args_default = ["python3", "query-gemini-v2.py", "--api_key", api_key, "--path", temp_path, "--threaded", "--sleep_time", str(sleep_time), "--repeat_count", str(repeat_count), "--max_retries", str(max_retries)]
+        args_default = ["python3", "query-gemini-v2.py", "--api_key", api_key, "--path", temp_path, "--threaded", "--sleep_time", str(sleep_time), "--repeat_count", str(repeat_count), "--max_retries", str(max_retries), "--policy", policy, "--max_threads", str(max_threads)]
         if proxy_addr:
             args_default.extend([ "--proxy", proxy_addr, "--proxy_auth", proxy_auth])
         t = threading.Thread(target=execute_command, args=(args_default, event))
@@ -86,8 +87,6 @@ def split_and_execute(folder_path:str, proxy_file:str, proxy_auth:str, num:int, 
         print("KeyboardInterrupt")
         # kill all threads
         event.set()
-        for t in threads:
-            t.kill()
         sys.exit(1)
 
 def load_proxies(proxy_file:str) -> List[str]:
@@ -111,7 +110,8 @@ if __name__ == "__main__":
     parser.add_argument('--max_threads', type=int, default=10, help='Max threads.')
     parser.add_argument('--sleep_time', type=int, default=1.1, help='Sleep time.')
     parser.add_argument('--repeat_count', type=int, default=3, help='Repeat count.')
-    parser.add_argument('--max_retries', type=int, default=5, help='Max retries.')
+    parser.add_argument('--max_retries', type=int, default=0, help='Max retries.')
+    parser.add_argument('--policy', type=str, default="default", help='Policy for skipping, skip_exist, default')
     args = parser.parse_args()
     # check folder_path exists
     api_file = args.api_file
@@ -125,4 +125,4 @@ if __name__ == "__main__":
     if not os.path.exists(args.folder_path):
         print(f"folder_path: {args.folder_path} does not exist")
         sys.exit(1)
-    split_and_execute(args.folder_path, args.proxy_file, args.proxy_auth, args.max_threads, args.sleep_time, args.repeat_count, args.max_retries)
+    split_and_execute(args.folder_path, args.proxy_file, args.proxy_auth, len(api_keys),  args.sleep_time, args.repeat_count, args.max_retries, args.policy, args.max_threads)

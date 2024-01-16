@@ -59,6 +59,9 @@ def tags_formatted(image_path):
     Loads .txt file from the given image path.
     """
     extension = pathlib.Path(image_path).suffix
+    if not os.path.exists(image_path.replace(extension, '.txt')):
+        print(f"Tags not found for {image_path}!")
+        raise FileNotFoundError(f"Tags not found for {image_path}!")
     with open(image_path.replace(extension, '.txt'), 'r',encoding='utf-8') as f:
         tags = f.read()
     return tags
@@ -76,8 +79,14 @@ def read_result(image_path):
     Reads Generated or Annotated text from the given image path.
     """
     extension = pathlib.Path(image_path).suffix
-    with open(image_path.replace(extension, '_annotated.txt'), 'r',encoding='utf-8') as f:
-        result = f.read()
+    if os.path.exists(image_path.replace(extension, '_gemini.txt')):
+        with open(image_path.replace(extension, '_gemini.txt'), 'r',encoding='utf-8') as f:
+            result = f.read()
+    elif os.path.exists(image_path.replace(extension, '_annotated.txt')):
+        with open(image_path.replace(extension, '_annotated.txt'), 'r',encoding='utf-8') as f:
+            result = f.read()
+    else:
+        result = None
     return result
 
 def sanity_check(tags, result):
@@ -152,6 +161,9 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
     if image_path.endswith('.txt') or image_path.endswith('.json'):
         return None
     extension = pathlib.Path(image_path).suffix
+    if not os.path.exists(image_path.replace(extension, '.txt')):
+        print(f"Tags not found for {image_path}!")
+        raise FileNotFoundError(f"Tags not found for {image_path}!")
     with open(image_path.replace(extension, '.txt'), 'r',encoding='utf-8') as f:
         tags = f.read()
     tags = get_tags_list(tags)
@@ -231,6 +243,9 @@ def query_gemini(path:str, extension:str = '.png', api_key=None, proxy=None, pro
         actual_extension = pathlib.Path(file).suffix
         result_expected_file = file.replace(actual_extension, '_gemini.txt')
         if POLICY == 'skip_existing' and os.path.exists(result_expected_file):
+            continue
+        if not os.path.exists(file):
+            print(f"File not found: {file}")
             continue
         query_gemini_file(file, None, repeats=repeat_count, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
 
@@ -312,6 +327,10 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
             actual_extension = pathlib.Path(file).suffix
             result_expected_file = file.replace(actual_extension, '_gemini.txt')
             if POLICY == 'skip_existing' and os.path.exists(result_expected_file):
+                pbar.update(1)
+                continue
+            if not os.path.exists(file):
+                print(f"File not found: {file}")
                 pbar.update(1)
                 continue
             executor.submit(query_gemini_file, file, pbar, repeats=3, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
