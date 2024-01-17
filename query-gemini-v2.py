@@ -195,11 +195,12 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
     ### TODO : convert to Factory pattern
     inputs = [
         instruction, # instruction for everything
-        tags_template, # tags example 1
         image_inference(), # image example 1
+        tags_template, # tags example 1
         template_result, # result example 1
-        tags_formatted(image_path), # tags given
         image_inference(image_path), # image given
+        "TAGS:",
+        tags_formatted(image_path), # tags given
         "RESPONSE INCLUDES ALL GIVEN TAGS:", # now generate
     ]
 
