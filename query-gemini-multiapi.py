@@ -61,8 +61,12 @@ def split_and_execute(folder_path:str, proxy_file:str, proxy_auth:str, num:int, 
     num = len(api_keys)
     temp_paths = split_into_temp_paths(folder_path, num)
     proxies = load_proxies(proxy_file)
+    def repeating_generator(iterable):
+        while True:
+            for item in iterable:
+                yield item
     if proxies:
-        proxies_iter = repeat(proxies)
+        proxies_iter = repeating_generator(proxies)
     else:
         proxies_iter = repeat(None)
     # execute query-gemini-4.py for each temp_path
@@ -73,9 +77,11 @@ def split_and_execute(folder_path:str, proxy_file:str, proxy_auth:str, num:int, 
         api_key = api_keys[i]
         print(f"temp_path: {temp_path}")
         print(f"api_key: {api_key}")
+        print(f"proxy_addr: {proxy_addr}")
         args_default = ["python3", "query-gemini-v2.py", "--api_key", api_key, "--path", temp_path, "--threaded", "--sleep_time", str(sleep_time), "--repeat_count", str(repeat_count), "--max_retries", str(max_retries), "--policy", policy, "--max_threads", str(max_threads)]
         if proxy_addr:
             args_default.extend([ "--proxy", proxy_addr, "--proxy_auth", proxy_auth])
+        print(f"line-command: {' '.join(args_default)}")
         t = threading.Thread(target=execute_command, args=(args_default, event))
         t.start()
         threads.append(t)

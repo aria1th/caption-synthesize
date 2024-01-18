@@ -13,13 +13,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from converter import generate_request, analyze_model_response
 
 POLICY = 'default' # default, skip_existing
-
+SLEEP_TIME = 1.1
 commit_time_dict = {}
 def wait_for_commit(proxy=None):
     """
     Wait for commit time to pass.
     """
-    while time.time() - commit_time_dict.get(proxy, 0) < 1.1:
+    while time.time() - commit_time_dict.get(proxy, 0) < SLEEP_TIME:
         time.sleep(0.05)
     commit_time_dict[proxy] = time.time()
     return
@@ -61,7 +61,6 @@ def image_inference(image_path=None):
         return
     image = Image.open(image_path)
     image = image.convert("RGB")
-    # resize if bigger than 768*768
     if image.size[0] * image.size[1] > 768 * 768:
         # resize to shorter side 768
         if image.size[0] > image.size[1]:
@@ -223,7 +222,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
                 if isinstance(e, KeyboardInterrupt):
                     raise e
                 print(f"Error occured while generating text for {image_path}! {e}")
-                print(f"Inputs: {inputs}")
+                # print(f"Inputs: {inputs}")
                 # dump response if exists
                 if response:
                     with open(image_path.replace(extension, '_gemini_error.txt'), 'w', encoding='utf-8') as f:
@@ -237,6 +236,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
         print(f"No previous result found for {image_path}, generating for the first time...")
         inputs = merge_strings(inputs)
     try:
+        wait_for_commit(proxy=proxy)
         response = generate_request(inputs, api_key, proxy=proxy, proxy_auth=proxy_auth)
         candidates = analyze_model_response(response)
         if len(candidates) > 1:
@@ -247,7 +247,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
         if isinstance(e, KeyboardInterrupt):
             raise e
         print(f"Error occurred while generating text for {image_path}! {e}")
-        print(f"Inputs: {inputs}")
+        # print(f"Inputs: {inputs}")
         return None
     return previous_result
 
@@ -275,6 +275,8 @@ def generate_repeat_text(image_path:str, previous_result:str, api_key=None, prox
     """
     results = []
     for _ in range(repeats):
+        if _ > 0:
+            time.sleep(SLEEP_TIME)
         results.append(generate_text(image_path, return_input=True, previous_result=previous_result, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth))
         if result_container is not None:
             result_container.append(results[-1])
@@ -354,7 +356,8 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
                 print(f"File not found: {file}")
                 pbar.update(1)
                 continue
-            future = executor.submit(query_gemini_file, file, pbar, repeats=3, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
+            future = executor.submit(query_gemini_file, file, pbar, repeats=repeat_count, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, repeat=repeat_count, max_retries=max_retries)
+            time.sleep(sleep_time)
             futures.append(future)
         for future in as_completed(futures):
             try:
@@ -405,6 +408,7 @@ if __name__ == '__main__':
     POLICY = args.policy
     api_arg = load_secret(api_arg)
     MAX_THREADS = args.max_threads
+    SLEEP_TIME = args.sleep_time
     if args.single_file: # query single file
         # python query-gemini-v2.py --single-file assets/5841101.jpg --api_key <api_key>
         query_gemini_file(args.single_file, None, repeats=args.repeat_count, api_key=api_arg, proxy=args.proxy, proxy_auth=args.proxy_auth, max_retries=args.max_retries)
