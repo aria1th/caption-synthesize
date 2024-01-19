@@ -4,3 +4,5 @@ venv
 sharegpt4v/InternLM-XComposer/
 models/
 .vscode/settings.json
+*.pyc
+*.txt

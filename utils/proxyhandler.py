@@ -135,6 +135,13 @@ class ProxyHandler:
                     del self.proxy_list[i]
                 if len(self.proxy_list) == 0:
                     raise Exception("No proxies available")
+    def get_address(self):
+        """
+        Returns the address of the proxy
+        """
+        self.proxy_index = (self.proxy_index + 1) % len(self.proxy_list)
+        self.wait_until_commit()
+        return self.proxy_list[self.proxy_index]
 
 class SingleProxyHandler(ProxyHandler):
     def __init__(self, proxy_url, proxy_auth="user:pass",port=80):

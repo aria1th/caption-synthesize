@@ -11,18 +11,14 @@ from PIL import Image
 import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from converter import generate_request, analyze_model_response
+from utils.proxyhandler import ProxyHandler, SingleProxyHandler
+from utils.apihandler import APIKeyIterator, SingleAPIkey, AbstractAPIIterator
 
 POLICY = 'default' # default, skip_existing
 SLEEP_TIME = 1.1
-commit_time_dict = {}
-def wait_for_commit(proxy=None):
-    """
-    Wait for commit time to pass.
-    """
-    while time.time() - commit_time_dict.get(proxy, 0) < SLEEP_TIME:
-        time.sleep(0.05)
-    commit_time_dict[proxy] = time.time()
-    return
+
+proxies = None
+api_keys = None
 
 def load_secret(api_key=None):
     """
@@ -167,7 +163,7 @@ def load_tag_templates_from_json(json_file_path, key:str = "TAGS_TEMPLATE"):
     return tag_template, template_result
 
 
-def generate_text(image_path, return_input=False, previous_result=None, api_key=None, proxy=None, proxy_auth=None):
+def generate_text(image_path, return_input=False, previous_result=None, api_key=None, proxy:ProxyHandler=None, proxy_auth=None):
     """
     Generate text from the given image and tags.
     We assume we have the tags in the same directory as the image. as filename.txt
@@ -211,8 +207,8 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
             inputs = merge_strings(inputs)
             response = None
             try:
-                wait_for_commit(proxy=proxy)
-                response = generate_request(inputs, api_key, proxy=proxy, proxy_auth=proxy_auth, dump_path=dump_path)
+                proxy_address = proxy.get_address() + "post_response" if proxy is not None else None
+                response = generate_request(inputs, api_key, proxy=proxy_address, proxy_auth=proxy_auth, dump_path=dump_path)
                 candidates = analyze_model_response(response)
                 if len(candidates) > 1:
                     print("WARNING: Multiple candidates found! You can use multiple responses to generate the final response.")
@@ -221,7 +217,7 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
             except Exception as e:
                 if isinstance(e, KeyboardInterrupt):
                     raise e
-                print(f"Error occured while generating text for {image_path}! {e}")
+                print(f"Error occured while generating text for {image_path}! {e}, api_key: {api_key}")
                 # print(f"Inputs: {inputs}")
                 # dump response if exists
                 if response:
@@ -236,8 +232,8 @@ def generate_text(image_path, return_input=False, previous_result=None, api_key=
         print(f"No previous result found for {image_path}, generating for the first time...")
         inputs = merge_strings(inputs)
     try:
-        wait_for_commit(proxy=proxy)
-        response = generate_request(inputs, api_key, proxy=proxy, proxy_auth=proxy_auth)
+        proxy_address = proxy.get_address() + "post_response" if proxy is not None else None
+        response = generate_request(inputs, api_key, proxy=proxy_address, proxy_auth=proxy_auth)
         candidates = analyze_model_response(response)
         if len(candidates) > 1:
             print("WARNING: Multiple candidates found! You can use multiple responses to generate the final response.")
@@ -269,15 +265,13 @@ def query_gemini(path:str, extension:str = '.png', api_key=None, proxy=None, pro
             continue
         query_gemini_file(file, None, repeats=repeat_count, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
 
-def generate_repeat_text(image_path:str, previous_result:str, api_key=None, proxy=None, proxy_auth=None,repeats=3, result_container:Optional[List] = None) -> List[str]:
+def generate_repeat_text(image_path:str, previous_result:str, api_key:AbstractAPIIterator=None, proxy=None, proxy_auth=None,repeats=3, result_container:Optional[List] = None) -> List[str]:
     """
     Generates the repeat text from the given image path and previous result.
     """
     results = []
     for _ in range(repeats):
-        if _ > 0:
-            time.sleep(SLEEP_TIME)
-        results.append(generate_text(image_path, return_input=True, previous_result=previous_result, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth))
+        results.append(generate_text(image_path, return_input=True, previous_result=previous_result, api_key=api_key.get(), proxy=proxy, proxy_auth=proxy_auth))
         if result_container is not None:
             result_container.append(results[-1])
         if results[-1] is not None:
@@ -356,14 +350,13 @@ def query_gemini_threaded(path:str, extension:str = '.png', sleep_time:float = 1
                 print(f"File not found: {file}")
                 pbar.update(1)
                 continue
-            future = executor.submit(query_gemini_file, file, pbar, repeats=repeat_count, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, repeat=repeat_count, max_retries=max_retries)
-            time.sleep(sleep_time)
+            future = executor.submit(query_gemini_file, file, pbar, repeats=repeat_count, api_key=api_key, proxy=proxy, proxy_auth=proxy_auth, max_retries=max_retries)
             futures.append(future)
         for future in as_completed(futures):
             try:
                 future.result()
             except Exception as e:
-                print(f"Error occured while processing {future}!")
+                print(f"Error occured while processing {future}! api_key: {api_key}")
                 print(f"Error: {e}")
                 print(future.result())
                 continue
@@ -394,11 +387,13 @@ if __name__ == '__main__':
     parser.add_argument('--single-file', type=str, help='If given, query single file')
     parser.add_argument('--ext', type=str, default='.png', help='File extension of the image')
     parser.add_argument('--api_key', type=str, default="", help='Google API Key')
+    parser.add_argument('--api_key_file', type=str, default="", help='Google API Key list file')
     parser.add_argument('--threaded', action='store_true', help='Use threaded version')
     parser.add_argument('--max_threads', type=int, default=8, help='Max threads to use')
     parser.add_argument('--sleep_time', type=float, default=1.1, help='Sleep time between threads')
     parser.add_argument('--proxy', type=str, default=None, help='Proxy to use')
     parser.add_argument('--proxy_auth', type=str, default=None, help='Proxy auth to use')
+    parser.add_argument('--proxy_file', type=str, default=None, help='Proxy list file')
     parser.add_argument('--repeat_count', type=int, default=3, help='Repeat count to use')
     parser.add_argument('--max_retries', type=int, default=5, help='Max retries to use')
     # policy, skip_existing, default
@@ -407,14 +402,22 @@ if __name__ == '__main__':
     api_arg = args.api_key
     POLICY = args.policy
     api_arg = load_secret(api_arg)
+    if args.api_key_file:
+        api_keys = APIKeyIterator(args.api_key_file, rate_limit=args.sleep_time)
+    else:
+        api_keys = SingleAPIkey(api_arg, rate_limit=args.sleep_time)
+    if args.proxy_file:
+        proxies = ProxyHandler(args.proxy_file, port=80, proxy_auth=args.proxy_auth)
+    elif args.proxy:
+        proxies = SingleProxyHandler(args.proxy, port=80, proxy_auth=args.proxy_auth)
     MAX_THREADS = args.max_threads
-    SLEEP_TIME = args.sleep_time
+    SLEEP_TIME = args.sleep_time * args.repeat_count
     if args.single_file: # query single file
         # python query-gemini-v2.py --single-file assets/5841101.jpg --api_key <api_key>
-        query_gemini_file(args.single_file, None, repeats=args.repeat_count, api_key=api_arg, proxy=args.proxy, proxy_auth=args.proxy_auth, max_retries=args.max_retries)
+        query_gemini_file(args.single_file, None, repeats=args.repeat_count, api_key=api_keys, proxy=args.proxy, proxy_auth=args.proxy_auth, max_retries=args.max_retries)
         sys.exit(0)
     if args.threaded:
         # python query-gemini-v2.py --path assets --ext .png --api_key <api_key> --threaded
-        query_gemini_threaded(args.path, args.ext, args.sleep_time, args.max_threads, args.repeat_count, api_key=api_arg, proxy=args.proxy, proxy_auth=args.proxy_auth, max_retries=args.max_retries)
+        query_gemini_threaded(args.path, args.ext, args.sleep_time, args.max_threads, args.repeat_count, api_key=api_keys, proxy=args.proxy, proxy_auth=args.proxy_auth, max_retries=args.max_retries)
     else:
-        query_gemini(args.path, args.ext, api_key=api_arg, proxy=args.proxy, proxy_auth=args.proxy_auth, repeat_count=args.repeat_count, max_retries=args.max_retries)
+        query_gemini(args.path, args.ext, api_key=api_keys, proxy=args.proxy, proxy_auth=args.proxy_auth, repeat_count=args.repeat_count, max_retries=args.max_retries)
