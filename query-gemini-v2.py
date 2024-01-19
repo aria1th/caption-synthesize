@@ -394,6 +394,7 @@ if __name__ == '__main__':
     parser.add_argument('--proxy', type=str, default=None, help='Proxy to use')
     parser.add_argument('--proxy_auth', type=str, default=None, help='Proxy auth to use')
     parser.add_argument('--proxy_file', type=str, default=None, help='Proxy list file')
+    parser.add_argument('--proxy_port', type=int, default=80, help='Proxy port to use')
     parser.add_argument('--repeat_count', type=int, default=3, help='Repeat count to use')
     parser.add_argument('--max_retries', type=int, default=5, help='Max retries to use')
     # policy, skip_existing, default
@@ -407,9 +408,9 @@ if __name__ == '__main__':
     else:
         api_keys = SingleAPIkey(api_arg, rate_limit=args.sleep_time)
     if args.proxy_file:
-        proxies = ProxyHandler(args.proxy_file, port=80, proxy_auth=args.proxy_auth)
+        proxies = ProxyHandler(args.proxy_file, port=args.proxy_port, proxy_auth=args.proxy_auth)
     elif args.proxy:
-        proxies = SingleProxyHandler(args.proxy, port=80, proxy_auth=args.proxy_auth)
+        proxies = SingleProxyHandler(args.proxy, port=args.proxy_port, proxy_auth=args.proxy_auth)
     MAX_THREADS = args.max_threads
     SLEEP_TIME = args.sleep_time * args.repeat_count
     if args.single_file: # query single file
