@@ -411,6 +411,7 @@ if __name__ == '__main__':
         proxies = ProxyHandler(args.proxy_file, port=args.proxy_port, proxy_auth=args.proxy_auth)
     elif args.proxy:
         proxies = SingleProxyHandler(args.proxy, port=args.proxy_port, proxy_auth=args.proxy_auth)
+    proxies.check()
     MAX_THREADS = args.max_threads
     SLEEP_TIME = args.sleep_time * args.repeat_count
     if args.single_file: # query single file
