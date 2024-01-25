@@ -7,6 +7,10 @@ import argparse
 import numpy as np
 import glob
 from tqdm import tqdm
+import logging
+
+logging_path = 'detect.log'
+logging.basicConfig(filename=logging_path, level=logging.ERROR)
 
 def active_preprocessor(imgs, batch_size=1):
     """
@@ -29,40 +33,53 @@ def active_preprocessor(imgs, batch_size=1):
     for future in futures:
         yield future.result()
 
-def detect(imgs, cuda_device=0, model='yolov8n.pt', batch_size=-1,stream:bool=False):
-    if not len(imgs):
-        return []
-    thread_pool = ThreadPoolExecutor(max_workers=1) # 1 thread per device, allows asynchronous execution and preprocessing
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_device)
-    model = YOLO(model) #YOLO('yolov8n-face.pt') # for face only
-    result_list = []
-    if batch_size == -1:
-        batch_size = len(imgs)
-    else:
-        batch_size = min(batch_size, len(imgs))
-    # split imgs into minibatch
-    divmod_result = divmod(len(imgs), batch_size)
-    batch_count = divmod_result[0]
-    if divmod_result[1] != 0:
-        batch_count += 1
-    minibatches_provider = active_preprocessor(imgs, batch_size)
-    futures = []
-    for minibatch in tqdm(minibatches_provider, desc=f'minibatch with device {cuda_device}', total=batch_count):
-        # print(f"handling {minibatch}") # debug once
-        #result_list.extend(model(minibatch))
-        # send to thread and get future, do not block
-        # verbose=False
-        futures.append(thread_pool.submit(model, minibatch, verbose=False))
-    # wait for all futures
-    for future in tqdm(futures, desc=f'Waiting for futures with device {cuda_device}'):
-        if stream:
-            # wait for each future
-            #print("Yielding")
-            yield from future.result()
+def detect(imgs, cuda_device=0, model='yolov8n.pt', batch_size=-1,stream:bool=False, max_infer_size=640, conf_threshold=0.3, iou_threshold=0.5):
+    try:
+        if not len(imgs):
+            return []
+        thread_pool = ThreadPoolExecutor(max_workers=1) # 1 thread per device, allows asynchronous execution and preprocessing
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_device)
+        model = YOLO(model) #YOLO('yolov8n-face.pt') # for face only
+        model.conf = conf_threshold
+        model.iou = iou_threshold
+        model.imgsz = max_infer_size
+        result_list = []
+        if batch_size == -1:
+            batch_size = len(imgs)
         else:
-            result_list.extend(future.result())
-    if not stream:
-        return result_list
+            batch_size = min(batch_size, len(imgs))
+        # split imgs into minibatch
+        divmod_result = divmod(len(imgs), batch_size)
+        batch_count = divmod_result[0]
+        if divmod_result[1] != 0:
+            batch_count += 1
+        minibatches_provider = active_preprocessor(imgs, batch_size)
+        futures = []
+        for minibatch in tqdm(minibatches_provider, desc=f'minibatch with device {cuda_device}', total=batch_count):
+            # print(f"handling {minibatch}") # debug once
+            #result_list.extend(model(minibatch))
+            # send to thread and get future, do not block
+            # verbose=False
+            futures.append(thread_pool.submit(model, minibatch, verbose=False))
+        # wait for all futures
+        for future in tqdm(futures, desc=f'Waiting for futures with device {cuda_device}'):
+            try:
+                if stream:
+                    # wait for each future
+                    #print("Yielding")
+                    yield from future.result()
+                else:
+                    result_list.extend(future.result())
+            except Exception as execption:
+                if isinstance(execption, KeyboardInterrupt):
+                    raise execption
+                logging.error(f'Exception occured: {execption}')
+                continue
+        if not stream:
+            return result_list
+    except Exception as execption:
+        logging.error(f'Exception occured: {execption}')
+        raise execption
 
 def crop_by_person(image: Image.Image, box_xyxy: list):
     """
@@ -95,7 +112,7 @@ def save_cropped_images(image: Image.Image, box_xyxy: list, original_filepath:st
     for i, cropped_image in enumerate(cropped_images):
         cropped_image.save(os.path.join(save_dir, f'{filename_without_ext}_{i}.jpg'))
 
-def detect_and_save_cropped_images(image_paths: List[str], save_dir: str, cuda_device: int = 0, model:str = 'yolov8n.pt', idx: int = 0, batch_size: int = -1):
+def detect_and_save_cropped_images(image_paths: List[str], save_dir: str, cuda_device: int = 0, model:str = 'yolov8n.pt', idx: int = 0, batch_size: int = -1, max_infer_size: int = 640, conf_threshold: float = 0.3, iou_threshold: float = 0.5):
     """
     Detect person and save cropped images
     :param image_path: image path
@@ -104,24 +121,30 @@ def detect_and_save_cropped_images(image_paths: List[str], save_dir: str, cuda_d
     :param model: model name, 'yolov8n.pt' or 'yolov8n-face.pt'
     :param idx: index of box to use as person box
     :param batch_size: minibatch size, -1 means all images at once
+    :param max_infer_size: max inference size
+    :param conf_threshold: confidence threshold
+    :param iou_threshold: iou threshold
     :return: None
     
     # xyxy[idx] is used for person box as index 0
     """
     if len(image_paths) == 0:
         return
-    results = detect(image_paths, cuda_device, model, batch_size, stream=True)
+    results = detect(image_paths, cuda_device, model, batch_size, stream=True, max_infer_size=max_infer_size, conf_threshold=conf_threshold, iou_threshold=iou_threshold)
     for path, r in zip(image_paths, results):
         #print(f'handling {path}')
         #print(r.boxes)
         image = Image.open(path).convert("RGB")
-        where_idx = r.boxes.cls.cpu().numpy() == 0 # person classes # [True, False, True, ...]
+        where_idx = r.boxes.cls.cpu().numpy() == idx # person classes # [True, False, True, ...]
         xyxy = r.boxes.xyxy[where_idx] # [tensor([x1, y1, x2, y2]), tensor([x1, y1, x2, y2]), ...]
         save_cropped_images(image, xyxy, path, save_dir)
 
-def main(cuda_devices:str, image_path:str, recursive:bool, save_dir:str, batch_size:int):
+def main(cuda_devices:str, image_path:str, recursive:bool, save_dir:str, batch_size:int, model:str = 'yolov8n.pt',
+        max_infer_size:int = 640, conf_threshold:float = 0.3, iou_threshold:float = 0.5):
     image_exts = ['jpg', 'jpeg', 'png', 'webp']
     image_paths = []
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
     if recursive:
         # use os.walk
         for root, dirs, files in os.walk(image_path):
@@ -144,7 +167,9 @@ def main(cuda_devices:str, image_path:str, recursive:bool, save_dir:str, batch_s
     try:
         with ProcessPoolExecutor(max_workers=len(available_cuda_devices)) as executor:
             for cuda_device, image_paths in zip(available_cuda_devices, image_paths_split):
-                executor.submit(detect_and_save_cropped_images, image_paths, save_dir, cuda_device, batch_size=batch_size)
+                executor.submit(detect_and_save_cropped_images, image_paths, save_dir, cuda_device, batch_size=batch_size,model=model,
+                                max_infer_size=max_infer_size, conf_threshold=conf_threshold, iou_threshold=iou_threshold
+                                )
     except KeyboardInterrupt:
         executor.shutdown(wait=False)
         print('KeyboardInterrupt')
@@ -157,5 +182,10 @@ if __name__ == '__main__':
     parser.add_argument('--recursive', action='store_true', help='recursive')
     parser.add_argument('--save-dir', type=str, default='/data/dataset_cropped', help='directory to save cropped images')
     parser.add_argument('--batch-size', type=int, default=-1, help='minibatch size, -1 means all images at once')
+    parser.add_argument('--model', type=str, default='yolov8n.pt', help='model name, yolov8n.pt or yolov8n-face.pt')
+    parser.add_argument('--max-infer-size', type=int, default=640, help='max inference size')
+    parser.add_argument('--conf-threshold', type=float, default=0.3, help='confidence threshold')
+    parser.add_argument('--iou-threshold', type=float, default=0.5, help='iou threshold')
     args = parser.parse_args()
-    main(args.cuda_devices, args.image_path, args.recursive, args.save_dir, args.batch_size)
+    main(args.cuda_devices, args.image_path, args.recursive, args.save_dir, args.batch_size, args.model, args.max_infer_size, args.conf_threshold, args.iou_threshold)
+
